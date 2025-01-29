@@ -1,17 +1,21 @@
-import psutil
-import torch
 from collections import Counter
 import math
-import time
 from scipy.stats import entropy
 from src.atari_env import AtariEnv
 from src.replay_buffer import ReplayBuffer
-from src.features.game_complexity import calculate_complexity_scores
 
 
 def get_network_architecture(dqn_agent):
     # need to use dnnmem to calculate layers and weights
     return None
+
+
+def environment_info(env):
+    return {
+        "game_name": env.unwrapped.spec.id,
+        "action_space": env.action_space.n,
+        "observation_space": env.observation_space.shape,
+    }
 
 
 def collect_static_features(
@@ -33,8 +37,6 @@ def collect_dynamic_features(
     # needs to add states_entropy = get_state_entropy(states)
     epsilon_config = (0.1, 0.01, 0.0001)
     exploration_rate = get_exploration_rate(episode_number, epsilon_config)
-    cpu_memory = get_cpu_memory()
-    gpu_memory = get_gpu_memory()
 
     return {
         "episode_reward": reward,
@@ -42,21 +44,7 @@ def collect_dynamic_features(
         "episode_duration": episode_duration,
         "episode_exploration_rate": exploration_rate,
         "episode_states_entropy": 0,
-        "cpu_memory": cpu_memory,
-        "gpu_memory": gpu_memory,
     }
-
-
-def get_timestamp():
-    return time.time()
-
-
-def get_game_complexity(game_id):
-    return calculate_complexity_scores(game_id)
-
-
-def get_replay_buffer_size(replay_buffer: ReplayBuffer):
-    return replay_buffer.usage
 
 
 def get_state_entropy(states):
@@ -66,32 +54,11 @@ def get_state_entropy(states):
 
 
 def get_exploration_rate(episode_number, epsilon_config):
-    epsilon_min, epsilon_max, decay_rate = epsilon_config
+    epsilon_min, epsilon_max, decay_rate = (
+        epsilon_config["epsilon_min"],
+        epsilon_config["epsilon"],
+        epsilon_config["epsilon_decay"],
+    )
     return epsilon_min + (epsilon_max - epsilon_min) * math.exp(
         -decay_rate * episode_number
     )
-
-
-def get_cpu_memory():
-    return psutil.Process().memory_info().rss  # Memory usage in bytes
-
-
-def get_gpu_memory():
-    if torch.cuda.is_available():
-        return torch.cuda.memory_allocated()
-    return 0
-
-
-def log_usage(replay_buffer: ReplayBuffer):
-    # GPU utilization
-    gpu_usage = torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-
-    # CPU memory
-    memory_info = psutil.virtual_memory()
-    cpu_usage = memory_info.used / 1e6  # MB
-
-    return {
-        "gpu_usage_mb": gpu_usage,
-        "cpu_usage_mb": cpu_usage,
-        "buffer_usage": replay_buffer.usage_percent(),
-    }
