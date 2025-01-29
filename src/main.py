@@ -5,21 +5,7 @@ import ale_py
 import numpy as np
 from src.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
-import yaml
-
-
-def load_config(config_path="config.yaml"):
-    """
-    Load the configuration from a YAML file.
-    Args:
-        config_path (str): Path to the configuration file.
-    Returns:
-        dict: Parsed configuration dictionary.
-    """
-    with open(config_path, "r") as file:
-        config = yaml.safe_load(file)
-    return config
-
+from src.loaders import load_config
 
 config = load_config("src/configurations/experiment_poc.yaml")
 episodes = config["environment"]["episodes"]
@@ -28,11 +14,18 @@ env = gym.make(
     id=config["environment"]["game_name"],
     render_mode=config["environment"]["render_mode"],
 )
+
+# remember to pass channel first for state dim
 agent = DQNAgent(
-    state_dim=env.observation_space.shape,
+    state_dim=(
+        env.observation_space.shape[2],
+        env.observation_space.shape[0],
+        env.observation_space.shape[1],
+    ),
     action_dim=env.action_space.n,
     config=config["agent"],
 )
+
 replay_buffer = ReplayBuffer(config["replay_buffer"])
 batch_size = config["environment"]["batch_size"]
 target_update_frequency = config["environment"]["target_update_frequency"]
@@ -56,6 +49,7 @@ for episode in range(episodes):
         state = next_state
         total_reward += reward
 
+    episode_time = time.time() - start_time
     # Train the agent at the end of the episode
     agent.train(batch_size, replay_buffer)
 

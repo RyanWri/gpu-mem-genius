@@ -2,8 +2,43 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from src.model import DQN
 from src.replay_buffer import ReplayBuffer
+
+
+class DQN(nn.Module):
+    def __init__(self, input_dim, action_dim):
+        super(DQN, self).__init__()
+        c, h, w = input_dim  # Channels, Height, Width
+
+        # Convolutional layers based on the Atari paper
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(c, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+        )
+
+        # Compute the output size of the conv layers dynamically
+        with torch.no_grad():
+            dummy_input = torch.zeros(
+                1, c, h, w
+            )  # Batch size 1, with given input dimensions
+            conv_output = self.conv_layers(dummy_input)
+            conv_output_size = conv_output.view(1, -1).size(1)  # Get flattened size
+
+        # Fully connected layers
+        self.fc_layers = nn.Sequential(
+            nn.Linear(conv_output_size, 512),
+            nn.ReLU(),
+            nn.Linear(512, action_dim),
+        )
+
+    def forward(self, x):
+        x = self.conv_layers(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        return self.fc_layers(x)
 
 
 class DQNAgent:
