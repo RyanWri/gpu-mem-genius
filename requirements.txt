@@ -14,3 +14,4 @@ ale-py
 scipy
 psutil
 pandas
+pyyaml

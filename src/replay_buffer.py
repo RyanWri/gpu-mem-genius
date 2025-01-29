@@ -3,10 +3,12 @@ from collections import deque
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, sample_size):
+    def __init__(self, config: dict):
+        buffer_size = config["buffer_size"]
+        batch_size = config["batch_size"]
         self.buffer = deque(maxlen=buffer_size)
         self.buffer_size = buffer_size
-        self.sample_size = sample_size
+        self.batch_size = batch_size
 
     def add(self, state, action, reward, next_state, done):
         self.buffer.append((state, action, reward, next_state, done))
@@ -30,5 +32,5 @@ class ReplayBuffer:
     def usage_percent(self):
         return len(self.buffer) / self.buffer_size * 100
 
-    def get_buffer_size(self):
-        return self.buffer_size
+    def get_current_size(self):
+        return len(self.buffer)

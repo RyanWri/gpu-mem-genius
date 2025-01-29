@@ -1,66 +1,114 @@
-import gymnasium as gym
+import pandas as pd
+import psutil
 import torch
-from agent import DQLAgent
-from replay_buffer import ReplayBuffer
-from metrics_exporter import MetricsExporter
+import time
+import gymnasium as gym
+import ale_py
+import numpy as np
+from src.features.collect import get_exploration_rate
+from src.dqn_agent import DQNAgent
+from src.replay_buffer import ReplayBuffer
+from src.loaders import load_config
 
-# Initialize components
-env = gym.make("CartPole-v1")
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.n
+# load configuration
+config = load_config("src/configurations/experiment_poc.yaml")
+episodes = config["environment"]["episodes"]
 
-agent = DQLAgent(state_dim, action_dim)
-replay_buffer = ReplayBuffer(buffer_size=10000)
-metrics_exporter = MetricsExporter()
+# register atari game
+gym.register_envs(ale_py)
+env = gym.make(
+    id=config["environment"]["game_name"],
+    render_mode=config["environment"]["render_mode"],
+)
 
-# Training loop
-episodes = 500
-batch_size = 64
+# build agent and replay buffer
+# remember to pass channel first for state dim
+agent = DQNAgent(
+    state_dim=(
+        env.observation_space.shape[2],
+        env.observation_space.shape[0],
+        env.observation_space.shape[1],
+    ),
+    action_dim=env.action_space.n,
+    config=config["agent"],
+)
+replay_buffer = ReplayBuffer(config["replay_buffer"])
+
+# hyperparameters
+batch_size = config["environment"]["batch_size"]
+target_update_frequency = config["environment"]["target_update_frequency"]
+
+
+# collect static features
+static_features = {
+    "game_name": config["environment"]["game_name"],
+    "state_dim": env.observation_space.shape,
+    "action_dim": env.action_space.n,
+}
+
+dataset = []
+
+# main loop
 for episode in range(episodes):
-    state, _ = env.reset()
+    # first step of an episode
+    state, info = env.reset()
+    state = np.transpose(state, (2, 0, 1))  # Convert to channel-first
     total_reward = 0
 
-    for t in range(200):  # Max timesteps
+    # measure episode time
+    start_time = time.time()
+
+    # run episode till truncated or terminated
+    done = False
+    while not done:
         action = agent.select_action(state)
-        next_state, reward, done, _, _ = env.step(action)
+        next_state, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+        next_state = np.transpose(next_state, (2, 0, 1))
+
+        # Add transition to replay buffer
         replay_buffer.add(state, action, reward, next_state, done)
         state = next_state
         total_reward += reward
 
-        # Sample from buffer and train
-        if len(replay_buffer.buffer) > batch_size:
-            states, actions, rewards, next_states, dones = replay_buffer.sample(
-                batch_size
-            )
-            states = torch.FloatTensor(states).to(agent.q_network.fc[0].weight.device)
-            actions = torch.LongTensor(actions).to(agent.q_network.fc[0].weight.device)
-            rewards = torch.FloatTensor(rewards).to(agent.q_network.fc[0].weight.device)
-            next_states = torch.FloatTensor(next_states).to(
-                agent.q_network.fc[0].weight.device
-            )
-            dones = torch.FloatTensor(dones).to(agent.q_network.fc[0].weight.device)
+    episode_time = time.time() - start_time
+    # dynamic features collected at the end of each episode should be inserted here
+    dynamic_features = {
+        "episode_reward": total_reward,
+        "episode_length": episode_time,
+        "exploration_rate": get_exploration_rate(episode, config["agent"]),
+    }
 
-            q_values = (
-                agent.q_network(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
-            )
-            next_q_values = agent.q_network(next_states).max(1)[0]
-            target = rewards + agent.gamma * next_q_values * (1 - dones)
+    # Convert to MB
+    gpu_before_train = (
+        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
+    )
 
-            loss = torch.nn.functional.mse_loss(q_values, target)
-            agent.optimizer.zero_grad()
-            loss.backward()
-            agent.optimizer.step()
+    # Train the agent at the end of the episode
+    agent.train(batch_size, replay_buffer)
 
-            metrics_exporter.log_metric("loss", loss.item())
+    # Convert to MB
+    gpu_after_train = (
+        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
+    )
 
-        if done:
-            break
+    # CPU memory
+    cpu_usage = psutil.virtual_memory().used / 1e6  # MB
 
-    # Log metrics
-    metrics_exporter.log_metric("rewards", total_reward)
-    metrics_exporter.log_gpu_stats()
-    agent.update_epsilon()
+    # Update the target network periodically
+    if episode % target_update_frequency == 0:
+        agent.update_target_network()
 
-print("Training completed!")
-metrics = metrics_exporter.export()
-print("Exported Metrics:", metrics)
+    memory_features = {
+        "gpu_before_train": gpu_before_train,
+        "gpu_after_train": gpu_after_train,
+        "cpu_usage": cpu_usage,
+    }
+
+    # Merge static and dynamic features
+    episode_features = {**static_features, **dynamic_features, **memory_features}
+    dataset.append(episode_features)
+
+
+df = pd.DataFrame(dataset)
+df.to_csv("dataset_v1.csv")
