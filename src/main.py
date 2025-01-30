@@ -1,17 +1,18 @@
-import pandas as pd
 import psutil
 import torch
 import time
 import gymnasium as gym
 import ale_py
 import numpy as np
-from src.features.collect import get_exploration_rate
-from src.dqn_agent import DQNAgent
+from src.features.collect import calc_agent_memory, get_exploration_rate
+from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
-from src.loaders import load_config
+from src.loaders import load_config, save_list_of_dicts_to_dataframe
 
 # load configuration
-config = load_config("src/configurations/experiment_poc.yaml")
+version = 1
+config_filename = f"src/configurations/experiment_poc_{version}.yaml"
+config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
 
 # register atari game
@@ -38,12 +39,14 @@ replay_buffer = ReplayBuffer(config["replay_buffer"])
 batch_size = config["environment"]["batch_size"]
 target_update_frequency = config["environment"]["target_update_frequency"]
 
+agent_hidden_model_memory = calc_agent_memory(agent.get_hidden_model())
 
 # collect static features
 static_features = {
     "game_name": config["environment"]["game_name"],
     "state_dim": env.observation_space.shape,
     "action_dim": env.action_space.n,
+    "agent_hidden_model_size": agent_hidden_model_memory,
 }
 
 dataset = []
@@ -109,6 +112,5 @@ for episode in range(episodes):
     episode_features = {**static_features, **dynamic_features, **memory_features}
     dataset.append(episode_features)
 
-
-df = pd.DataFrame(dataset)
-df.to_csv("dataset_v1.csv")
+# save dataset as dataframe to disk
+save_list_of_dicts_to_dataframe(dataset, config["environment"]["save_options"])

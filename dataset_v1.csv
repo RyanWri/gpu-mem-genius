@@ -1,3 +1,0 @@
-,game_name,state_dim,action_dim,episode_reward,episode_length,exploration_rate,gpu_before_train,gpu_after_train,cpu_usage
-0,ALE/Pong-v5,"(210, 160, 3)",6,-20.0,0.4862825870513916,1.0,0,0,5381.464064
-1,ALE/Pong-v5,"(210, 160, 3)",6,-21.0,0.41161394119262695,0.4327511000896531,0,0,5482.774528

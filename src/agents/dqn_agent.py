@@ -121,3 +121,6 @@ class DQNAgent:
         Update the target network weights.
         """
         self.target_network.load_state_dict(self.q_network.state_dict())
+
+    def get_hidden_model(self):
+        return self.q_network
