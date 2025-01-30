@@ -1,11 +1,13 @@
 from collections import Counter
 import math
 from scipy.stats import entropy
+from src.features.dnnmem import estimate_model_mb
 
 
 # need to use dnnmem to calculate layers and weights
-def get_network_architecture(agent):
-    return None
+def calc_agent_memory(agent):
+    estimated_size = estimate_model_mb(agent)
+    return estimated_size
 
 
 # learn distribution of states
