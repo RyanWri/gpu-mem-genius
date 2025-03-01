@@ -1,3 +1,4 @@
+from datetime import datetime
 import psutil
 import torch
 import time
@@ -7,13 +8,15 @@ import numpy as np
 from src.features.collect import calc_agent_memory, get_exploration_rate
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
-from src.loaders import load_config, save_list_of_dicts_to_dataframe
+from src.loaders import load_config, save_checkpoint, save_list_of_dicts_to_dataframe
 
 # load configuration
-version = 1
+version = 2
 config_filename = f"src/configurations/experiment_poc_{version}.yaml"
 config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
+save_options = config["environment"]["save_options"]
+
 
 # register atari game
 gym.register_envs(ale_py)
@@ -50,9 +53,15 @@ static_features = {
 }
 
 dataset = []
+dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 # main loop
 for episode in range(episodes):
+    # Modify Training Loop in `main.py`
+    if episode % 5000 == 0:
+        save_checkpoint(agent, episode, save_options, dt)
+
     # first step of an episode
     state, info = env.reset()
     state = np.transpose(state, (2, 0, 1))  # Convert to channel-first
@@ -112,5 +121,6 @@ for episode in range(episodes):
     episode_features = {**static_features, **dynamic_features, **memory_features}
     dataset.append(episode_features)
 
-# save dataset as dataframe to disk
-save_list_of_dicts_to_dataframe(dataset, config["environment"]["save_options"])
+    if episode % 100 == 0:
+        # save dataset as dataframe to disk
+        save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
