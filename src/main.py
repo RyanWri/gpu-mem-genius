@@ -18,12 +18,12 @@ logging.basicConfig(
 
 # load configuration
 logging.info("Loading configuration...")
-version = 2
-config_filename = f"src/configurations/experiment_poc_{version}.yaml"
+experiment_game = "freeway"
+config_filename = f"src/configurations/experiment_{experiment_game}.yaml"
 config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
-save_options = config["environment"]["save_options"]
-
+save_options = config["save_options"]
+checkpoints = config["checkpoints"]
 
 # register atari game
 logging.info(f"Registering environment: {config['environment']['game_name']}")
@@ -66,7 +66,7 @@ for episode in range(episodes):
     logging.info(f"Starting episode {episode+1}/{episodes}")
 
     # Modify Training Loop in `main.py`
-    if episode % 100 == 0:
+    if episode % checkpoints["frequency"] == 0:
         save_checkpoint(agent, episode, save_options, dt)
     # first step of an episode
     state, info = env.reset()
@@ -86,14 +86,11 @@ for episode in range(episodes):
         next_state, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
-        # Train the agent every batch_size steps
-        curr_buffer_size = replay_buffer.get_current_size()
         if step % batch_size == 0:
-            logging.info(f"Training agent... {step}")
+            # Train the agent every batch_size steps
             agent.train(batch_size, replay_buffer)
-
-        if step % target_update_frequency == 0:  # Update target network every 1K steps
-            logging.info("Updating target network...")
+        if step % target_update_frequency == 0:
+            # Update target network every 1K steps
             agent.update_target_network()
 
         # Add transition to replay buffer
@@ -129,7 +126,7 @@ for episode in range(episodes):
     episode_features = {**static_features, **dynamic_features, **memory_features}
     dataset.append(episode_features)
 
-    if episode % 10 == 0:
+    if episode % checkpoints["data"] == 0:
         # save dataset as dataframe to disk
         logging.info("Saving dataset...")
         save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
