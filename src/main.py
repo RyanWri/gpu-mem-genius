@@ -1,3 +1,4 @@
+from datetime import datetime
 import psutil
 import torch
 import time
@@ -18,11 +19,12 @@ logging.basicConfig(
 )
 
 # load configuration
-logging.info("Loading configuration...")
 version = 1
 config_filename = f"src/configurations/experiment_poc_{version}.yaml"
 config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
+save_options = config["environment"]["save_options"]
+
 
 # register atari game
 logging.info(f"Registering environment: {config['environment']['game_name']}")
@@ -60,10 +62,16 @@ static_features = {
 }
 
 dataset = []
+dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 # main loop
 for episode in range(episodes):
     logging.info(f"Starting episode {episode+1}/{episodes}")
+
+    # Modify Training Loop in `main.py`
+    if episode % 5000 == 0:
+        save_checkpoint(agent, episode, save_options, dt)
 
     # first step of an episode
     state, info = env.reset()
@@ -133,7 +141,8 @@ for episode in range(episodes):
     episode_features = {**static_features, **dynamic_features, **memory_features}
     dataset.append(episode_features)
 
-# save dataset as dataframe to disk
-logging.info("Saving dataset...")
-save_list_of_dicts_to_dataframe(dataset, config["environment"]["save_options"])
+    if episode % 100 == 0:
+        # save dataset as dataframe to disk
+        logging.info("Saving dataset...")
+save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
 logging.info("Training complete.")

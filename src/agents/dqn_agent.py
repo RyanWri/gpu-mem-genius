@@ -64,8 +64,10 @@ class DQNAgent:
         self.target_network.eval()
 
         # Optimizer
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.lr)
-        self.loss_fn = nn.MSELoss()
+        self.optimizer = optim.RMSprop(
+            self.q_network.parameters(), lr=self.lr, alpha=0.95, eps=0.01
+        )
+        self.loss_fn = nn.SmoothL1Loss()
 
     def select_action(self, state):
         """
