@@ -18,8 +18,6 @@ def estimate_model_size(model):
 # This allows you to inspect each layer's type, name, parameters, etc.
 def get_model_architecture(model):
     for name, module in model.named_modules():
-        if name == "":
-            continue
         print(f"Module Name: {name}, Type: {type(module)}")
 
 

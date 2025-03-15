@@ -1,5 +1,6 @@
 from collections import Counter
 import math
+import torch
 from scipy.stats import entropy
 from src.features.dnnmem import estimate_model_mb
 
@@ -47,3 +48,9 @@ def calculate_rules_complexity(game_id):
         # Add more games as needed
     }
     return complexity_mapping.get(game_id, 1)  # Default to 1 if game not listed
+
+
+def collect_gpu_metrics():
+    allocated = torch.cuda.memory_allocated() / 1e6
+    reserved = torch.cuda.memory_reserved() / 1e6
+    max_allocated = torch.cuda.max_memory_allocated() / 1e6

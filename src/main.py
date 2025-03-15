@@ -4,18 +4,28 @@ import time
 import gymnasium as gym
 import ale_py
 import numpy as np
+import logging
 from src.features.collect import calc_agent_memory, get_exploration_rate
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
 from src.loaders import load_config, save_list_of_dicts_to_dataframe
 
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("training.log")],
+)
+
 # load configuration
+logging.info("Loading configuration...")
 version = 1
 config_filename = f"src/configurations/experiment_poc_{version}.yaml"
 config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
 
 # register atari game
+logging.info(f"Registering environment: {config['environment']['game_name']}")
 gym.register_envs(ale_py)
 env = gym.make(
     id=config["environment"]["game_name"],
@@ -53,6 +63,8 @@ dataset = []
 
 # main loop
 for episode in range(episodes):
+    logging.info(f"Starting episode {episode+1}/{episodes}")
+
     # first step of an episode
     state, info = env.reset()
     state = np.transpose(state, (2, 0, 1))  # Convert to channel-first
@@ -63,6 +75,13 @@ for episode in range(episodes):
 
     # run episode till truncated or terminated
     done = False
+    step = 0
+
+    # Convert to MB
+    gpu_before_train = (
+        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
+    )
+
     while not done:
         action = agent.select_action(state)
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -73,8 +92,22 @@ for episode in range(episodes):
         replay_buffer.add(state, action, reward, next_state, done)
         state = next_state
         total_reward += reward
+        step += 1
+
+        # Train the agent every N steps (e.g., 4 steps)
+        curr_buffer_size = replay_buffer.get_current_size()
+        if curr_buffer_size > batch_size and step % 4 == 0:
+            agent.train(batch_size, replay_buffer)
+
+        if step % 1000 == 0:  # Update target network every 1K steps
+            logging.info("Updating target network...")
+            agent.update_target_network()
 
     episode_time = time.time() - start_time
+    logging.info(
+        f"Episode {episode+1} finished. Reward: {total_reward}, Time: {episode_time:.2f}s"
+    )
+
     # dynamic features collected at the end of each episode should be inserted here
     dynamic_features = {
         "episode_reward": total_reward,
@@ -83,24 +116,12 @@ for episode in range(episodes):
     }
 
     # Convert to MB
-    gpu_before_train = (
-        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-    )
-
-    # Train the agent at the end of the episode
-    agent.train(batch_size, replay_buffer)
-
-    # Convert to MB
     gpu_after_train = (
         torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
     )
 
     # CPU memory
     cpu_usage = psutil.virtual_memory().used / 1e6  # MB
-
-    # Update the target network periodically
-    if episode % target_update_frequency == 0:
-        agent.update_target_network()
 
     memory_features = {
         "gpu_before_train": gpu_before_train,
@@ -113,4 +134,6 @@ for episode in range(episodes):
     dataset.append(episode_features)
 
 # save dataset as dataframe to disk
+logging.info("Saving dataset...")
 save_list_of_dicts_to_dataframe(dataset, config["environment"]["save_options"])
+logging.info("Training complete.")
