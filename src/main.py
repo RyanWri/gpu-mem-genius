@@ -19,7 +19,8 @@ logging.basicConfig(
 )
 
 # load configuration
-version = 1
+logging.info("Loading configuration...")
+version = 2
 config_filename = f"src/configurations/experiment_poc_{version}.yaml"
 config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
