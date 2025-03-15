@@ -10,34 +10,28 @@ class DQN(nn.Module):
         super(DQN, self).__init__()
         c, h, w = input_dim  # Channels, Height, Width
 
-        # Convolutional layers based on the Atari paper
+        # Two convolutional layers as described in the paper:
         self.conv_layers = nn.Sequential(
-            nn.Conv2d(c, 32, kernel_size=8, stride=4),
+            nn.Conv2d(c, 16, kernel_size=8, stride=4),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.Conv2d(16, 32, kernel_size=4, stride=2),
             nn.ReLU(),
         )
 
-        # Compute the output size of the conv layers dynamically
+        # Dynamically compute the size of the output from conv layers:
         with torch.no_grad():
-            dummy_input = torch.zeros(
-                1, c, h, w
-            )  # Batch size 1, with given input dimensions
-            conv_output = self.conv_layers(dummy_input)
-            conv_output_size = conv_output.view(1, -1).size(1)  # Get flattened size
+            dummy_input = torch.zeros(1, c, h, w)
+            conv_out = self.conv_layers(dummy_input)
+            conv_out_size = conv_out.view(1, -1).size(1)
 
-        # Fully connected layers
+        # Fully connected layers: one hidden layer with 256 units, then output layer.
         self.fc_layers = nn.Sequential(
-            nn.Linear(conv_output_size, 512),
-            nn.ReLU(),
-            nn.Linear(512, action_dim),
+            nn.Linear(conv_out_size, 256), nn.ReLU(), nn.Linear(256, action_dim)
         )
 
     def forward(self, x):
         x = self.conv_layers(x)
-        x = x.view(x.size(0), -1)  # Flatten
+        x = x.view(x.size(0), -1)  # Flatten the conv output
         return self.fc_layers(x)
 
 
@@ -72,6 +66,7 @@ class DQNAgent:
     def select_action(self, state):
         """
         Epsilon-greedy action selection.
+        Expects state to have shape (channels, height, width). We add a batch dimension.
         """
         if np.random.rand() < self.epsilon:
             return np.random.randint(self.action_dim)
@@ -85,27 +80,37 @@ class DQNAgent:
     def train(self, batch_size, replay_buffer: ReplayBuffer):
         """
         Train the Q-network using a batch from the replay buffer.
+        Expects that the replay buffer returns tensors of correct shape:
+            - states: (batch_size, channels, height, width)
+            - actions: (batch_size, 1)
+            - rewards: (batch_size, 1)
+            - next_states: (batch_size, channels, height, width)
+            - dones: (batch_size, 1)
         """
         if replay_buffer.get_current_size() < batch_size:
             return
 
-        # Sample batch
+        # Sample a batch from the replay buffer
         states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
-        states.to(self.device)
-        actions.to(self.device)
-        rewards.to(self.device)
-        next_states.to(self.device)
-        dones.to(self.device)
+        # The tensors are already on the appropriate device from ReplayBuffer,
+        # but we can re-ensure that here.
+        states = states.to(self.device)
+        actions = actions.to(
+            self.device
+        ).long()  # Already unsqueezed in the ReplayBuffer
+        rewards = rewards.to(self.device)
+        next_states = next_states.to(self.device)
+        dones = dones.to(self.device)
 
-        # Compute Q-values
+        # Compute Q-values for current states
         q_values = self.q_network(states).gather(1, actions)
 
-        # Compute target Q-values
+        # Compute target Q-values using the target network
         with torch.no_grad():
             max_next_q_values = self.target_network(next_states).max(1)[0].unsqueeze(1)
             target_q_values = rewards + (1 - dones) * self.gamma * max_next_q_values
 
-        # Compute loss and optimize
+        # Compute loss and perform optimization
         loss = self.loss_fn(q_values, target_q_values)
         self.optimizer.zero_grad()
         loss.backward()

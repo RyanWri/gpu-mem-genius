@@ -1,12 +1,9 @@
 from datetime import datetime
-from datetime import datetime
 import psutil
 import torch
 import time
-import gymnasium as gym
-import ale_py
-import numpy as np
 import logging
+from src.atari_env import make_env
 from src.features.collect import calc_agent_memory, get_exploration_rate
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
@@ -30,20 +27,16 @@ save_options = config["environment"]["save_options"]
 
 # register atari game
 logging.info(f"Registering environment: {config['environment']['game_name']}")
-gym.register_envs(ale_py)
-env = gym.make(
-    id=config["environment"]["game_name"],
-    render_mode=config["environment"]["render_mode"],
+env = make_env(
+    config["environment"]["game_name"],
+    config["environment"]["render_mode"],
+    config["environment"]["obs_type"],
 )
 
 # build agent and replay buffer
 # remember to pass channel first for state dim
 agent = DQNAgent(
-    state_dim=(
-        env.observation_space.shape[2],
-        env.observation_space.shape[0],
-        env.observation_space.shape[1],
-    ),
+    state_dim=env.observation_space.shape,
     action_dim=env.action_space.n,
     config=config["agent"],
 )
@@ -68,28 +61,20 @@ dt = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 # main loop
+step = 0
 for episode in range(episodes):
     logging.info(f"Starting episode {episode+1}/{episodes}")
 
     # Modify Training Loop in `main.py`
-    if episode % 5000 == 0:
+    if episode % 100 == 0:
         save_checkpoint(agent, episode, save_options, dt)
-
-    # Modify Training Loop in `main.py`
-    if episode % 5000 == 0:
-        save_checkpoint(agent, episode, save_options, dt)
-
     # first step of an episode
     state, info = env.reset()
-    state = np.transpose(state, (2, 0, 1))  # Convert to channel-first
     total_reward = 0
-
     # measure episode time
     start_time = time.time()
-
     # run episode till truncated or terminated
     done = False
-    step = 0
 
     # Convert to MB
     gpu_before_train = (
@@ -100,7 +85,16 @@ for episode in range(episodes):
         action = agent.select_action(state)
         next_state, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
-        next_state = np.transpose(next_state, (2, 0, 1))
+
+        # Train the agent every batch_size steps
+        curr_buffer_size = replay_buffer.get_current_size()
+        if step % batch_size == 0:
+            logging.info(f"Training agent... {step}")
+            agent.train(batch_size, replay_buffer)
+
+        if step % target_update_frequency == 0:  # Update target network every 1K steps
+            logging.info("Updating target network...")
+            agent.update_target_network()
 
         # Add transition to replay buffer
         replay_buffer.add(state, action, reward, next_state, done)
@@ -108,19 +102,7 @@ for episode in range(episodes):
         total_reward += reward
         step += 1
 
-        # Train the agent every N steps (e.g., 4 steps)
-        curr_buffer_size = replay_buffer.get_current_size()
-        if curr_buffer_size > batch_size and step % 4 == 0:
-            agent.train(batch_size, replay_buffer)
-
-        if step % 1000 == 0:  # Update target network every 1K steps
-            logging.info("Updating target network...")
-            agent.update_target_network()
-
     episode_time = time.time() - start_time
-    logging.info(
-        f"Episode {episode+1} finished. Reward: {total_reward}, Time: {episode_time:.2f}s"
-    )
 
     # dynamic features collected at the end of each episode should be inserted here
     dynamic_features = {
@@ -147,11 +129,9 @@ for episode in range(episodes):
     episode_features = {**static_features, **dynamic_features, **memory_features}
     dataset.append(episode_features)
 
-    if episode % 100 == 0:
+    if episode % 10 == 0:
         # save dataset as dataframe to disk
         logging.info("Saving dataset...")
-save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
-logging.info("Training complete.")
-    if episode % 100 == 0:
-        # save dataset as dataframe to disk
         save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
+
+logging.info("Training complete.")

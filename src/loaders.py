@@ -20,10 +20,12 @@ def save_list_of_dicts_to_dataframe(dict_list: list[dict], save_options: dict, d
 
     df = pd.DataFrame(dict_list)
     folder, format = save_options.values()
-    filename = f"{dt}.{format}"
-    save_path = os.path.join(folder, filename)
+    filename = f"data.{format}"
+    save_path = os.path.join(folder, dt, filename)
     if format == "csv":
-        df.to_csv(save_path)
+        df.to_csv(
+            save_path,
+        )
     else:
         # by default save parquet unless otherwise
         df.to_parquet(save_path)
