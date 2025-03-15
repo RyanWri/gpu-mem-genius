@@ -8,6 +8,7 @@ pyclean<=2.7.2
 gymnasium
 gymnasium[classic-control]
 matplotlib
+seaborn
 diagrams
 ipython
 ale-py
@@ -15,3 +16,4 @@ scipy
 psutil
 pandas
 pyyaml
+ipykernel
