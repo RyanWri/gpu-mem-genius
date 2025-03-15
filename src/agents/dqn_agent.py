@@ -91,15 +91,11 @@ class DQNAgent:
 
         # Sample batch
         states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
-
-        # Convert to tensors
-        states = torch.tensor(states, dtype=torch.float32).to(self.device)
-        actions = torch.tensor(actions, dtype=torch.long).unsqueeze(1).to(self.device)
-        rewards = (
-            torch.tensor(rewards, dtype=torch.float32).unsqueeze(1).to(self.device)
-        )
-        next_states = torch.tensor(next_states, dtype=torch.float32).to(self.device)
-        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1).to(self.device)
+        states.to(self.device)
+        actions.to(self.device)
+        rewards.to(self.device)
+        next_states.to(self.device)
+        dones.to(self.device)
 
         # Compute Q-values
         q_values = self.q_network(states).gather(1, actions)
