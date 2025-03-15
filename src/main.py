@@ -3,6 +3,7 @@ import psutil
 import torch
 import time
 import logging
+from src.features.dnnmem import free_memory_if_needed
 from src.atari_env import make_env
 from src.features.collect import calc_agent_memory, get_exploration_rate
 from src.agents.dqn_agent import DQNAgent
@@ -18,7 +19,7 @@ logging.basicConfig(
 
 # load configuration
 logging.info("Loading configuration...")
-experiment_game = "freeway"
+experiment_game = "pong"
 config_filename = f"src/configurations/experiment_{experiment_game}.yaml"
 config = load_config(config_filename)
 episodes = config["environment"]["episodes"]
@@ -130,5 +131,7 @@ for episode in range(episodes):
         # save dataset as dataframe to disk
         logging.info("Saving dataset...")
         save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
+
+    free_memory_if_needed(replay_buffer, gpu_flush=False)
 
 logging.info("Training complete.")

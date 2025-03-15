@@ -1,3 +1,8 @@
+import psutil
+import torch
+from src.replay_buffer import ReplayBuffer
+
+
 # 1) Pseudocode to estimate model size in PyTorch:
 # function estimate_model_size(model):
 # This function sums up the memory taken by each parameter in the model.
@@ -32,3 +37,11 @@ def estimate_model_mb(model):
     model_size_bytes = estimate_model_size(model)
     model_size_mb = model_size_bytes / (1024**2)
     return model_size_mb
+
+
+def free_memory_if_needed(replay_buffer: ReplayBuffer, gpu_flush: bool) -> None:
+    if psutil.virtual_memory().percent > 80:
+        print("[WARNING] Memory usage is high Flushing the replay buffer.")
+        replay_buffer.clear()
+        if gpu_flush:
+            torch.cuda.empty_cache()

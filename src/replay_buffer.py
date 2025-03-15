@@ -1,3 +1,4 @@
+import gc
 import torch
 import numpy as np
 from collections import deque
@@ -51,3 +52,7 @@ class ReplayBuffer:
 
     def get_current_size(self):
         return len(self.buffer)
+
+    def clear(self):
+        self.buffer.clear()
+        gc.collect()
