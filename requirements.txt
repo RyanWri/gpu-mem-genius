@@ -7,6 +7,7 @@ pynvml<=11.5.0
 pyclean<=2.7.2
 gymnasium
 gymnasium[classic-control]
+gymnasium[atari]
 matplotlib
 seaborn
 diagrams
@@ -17,3 +18,4 @@ psutil
 pandas
 pyyaml
 ipykernel
+opencv-python
