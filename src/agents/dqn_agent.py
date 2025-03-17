@@ -46,7 +46,7 @@ class DQNAgent:
         self.action_dim = action_dim
         self.gamma = config.get("gamma", 0.99)
         self.epsilon = config.get("epsilon", 1.0)
-        self.epsilon_decay = config.get("epsilon_decay", 0.995)
+        self.epsilon_decay = config.get("epsilon_decay", 0.9995)
         self.epsilon_min = config.get("epsilon_min", 0.1)
         self.lr = config.get("lr", 1e-4)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

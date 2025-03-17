@@ -3,12 +3,16 @@ import psutil
 import torch
 import time
 import logging
-from src.features.dnnmem import free_memory_if_needed
 from src.atari_env import make_env
 from src.features.collect import calc_agent_memory, get_exploration_rate
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
-from src.loaders import load_config, save_checkpoint, save_list_of_dicts_to_dataframe
+from src.loaders import (
+    load_checkpoint,
+    load_config,
+    save_checkpoint,
+    save_list_of_dicts_to_dataframe,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -41,6 +45,12 @@ agent = DQNAgent(
     action_dim=env.action_space.n,
     config=config["agent"],
 )
+
+# load checkpoint if necessary
+if checkpoints["load_checkpoint"]:
+    logging.info("Loading checkpoint ...")
+    load_checkpoint(agent, checkpoints["checkpoint_path"])
+
 replay_buffer = ReplayBuffer(config["replay_buffer"])
 
 # hyperparameters
@@ -63,8 +73,8 @@ dt = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # main loop
 step = 0
-for episode in range(episodes):
-    logging.info(f"Starting episode {episode+1}/{episodes}")
+for episode in range(episodes + 1):
+    logging.info(f"Starting episode {episode}/{episodes+1}")
 
     # Modify Training Loop in `main.py`
     if episode % checkpoints["frequency"] == 0:
@@ -95,7 +105,7 @@ for episode in range(episodes):
             agent.update_target_network()
 
         # Add transition to replay buffer
-        replay_buffer.add(state, action, reward, next_state, done)
+        replay_buffer.add(state, action, reward, next_state, done, step)
         state = next_state
         total_reward += reward
         step += 1
@@ -131,7 +141,5 @@ for episode in range(episodes):
         # save dataset as dataframe to disk
         logging.info("Saving dataset...")
         save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
-
-    free_memory_if_needed(replay_buffer, gpu_flush=False)
 
 logging.info("Training complete.")
