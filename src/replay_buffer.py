@@ -18,6 +18,7 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done, step):
         """Store a transition (state, action, reward, next_state, done) in the CPU buffer."""
+        reward = np.clip(reward, -1, 1)
         self.buffer.append((state, action, reward, next_state, done))
 
         # Every 50k steps, transfer 50k samples to GPU
@@ -84,51 +85,73 @@ class ReplayBuffer:
 
     def reduce_memory_usage(self):
         """Free unused CPU memory by reducing buffer size and running garbage collection."""
-        # Remove oldest 25% of stored experiences
-        num_to_remove = len(self.buffer) // 4
+        num_to_remove = int(len(self.buffer) * 0.5)
         for _ in range(num_to_remove):
             self.buffer.popleft()
-
         # Run garbage collection
         gc.collect()
 
         # Free unused PyTorch memory
         if self.device == "cuda":
             torch.cuda.empty_cache()
+            self.transfer_to_gpu()
 
         print("[INFO] Reduced buffer size and cleared cache. CPU memory freed.")
 
     def sample(self, batch_size):
-        """Sample from the GPU buffer if available, otherwise from CPU."""
-        if self.gpu_buffer and self.gpu_buffer_size >= batch_size:
-            indices = np.random.choice(self.gpu_buffer_size, batch_size, replace=False)
-            return tuple(tensor[indices] for tensor in self.gpu_buffer)
-        else:
-            # Sample from CPU buffer
-            indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-            return (
-                torch.tensor(
-                    np.array([self.buffer[i][0] for i in indices]), dtype=torch.float32
-                ).to(self.device),
-                torch.tensor(
-                    np.array([self.buffer[i][1] for i in indices]), dtype=torch.int64
-                )
-                .unsqueeze(1)
-                .to(self.device),
-                torch.tensor(
-                    np.array([self.buffer[i][2] for i in indices]), dtype=torch.float32
-                )
-                .unsqueeze(1)
-                .to(self.device),
-                torch.tensor(
-                    np.array([self.buffer[i][3] for i in indices]), dtype=torch.float32
-                ).to(self.device),
-                torch.tensor(
-                    np.array([self.buffer[i][4] for i in indices]), dtype=torch.float32
-                )
-                .unsqueeze(1)
-                .to(self.device),
-            )
+        """Sample batch from replay buffer and stack frames correctly"""
+        indices = np.random.choice(len(self.buffer) - 3, batch_size, replace=False)
+        states, actions, rewards, next_states, dones = [], [], [], [], []
+        for idx in indices:
+            # Stack 4 consecutive frames to form a state
+            state_stack = np.stack(
+                [self.buffer[idx + i][0] for i in range(4)], axis=0
+            )  # shape (4, 84, 84)
+
+            next_state_stack = np.stack(
+                [self.buffer[idx + i][3] for i in range(4)], axis=0
+            )  # shape (4, 84, 84)
+
+            states.append(state_stack)
+            actions.append(self.buffer[idx][1])
+            rewards.append(self.buffer[idx][2])
+            next_states.append(next_state_stack)
+            dones.append(self.buffer[idx][4])
+
+        return (
+            torch.tensor(np.array(states), dtype=torch.uint8).to(self.device),
+            torch.tensor(np.array(actions), dtype=torch.int64)
+            .unsqueeze(1)
+            .to(self.device),
+            torch.tensor(np.array(rewards), dtype=torch.float32)
+            .unsqueeze(1)
+            .to(self.device),
+            torch.tensor(np.array(next_states), dtype=torch.uint8).to(self.device),
+            torch.tensor(np.array(dones), dtype=torch.float32)
+            .unsqueeze(1)
+            .to(self.device),
+        )
+
+    def get_stacked_state(self, current_state):
+        frame_history = [current_state]  # Start with the latest frame
+
+        # Retrieve the last 3 states from the buffer
+        for i in range(3):
+            if len(self.buffer) > i:
+                frame_history.append(
+                    self.buffer[-(i + 1)][0]
+                )  # Get the last stored frame
+            else:
+                frame_history.append(
+                    current_state
+                )  # Repeat the current frame if buffer is not full
+
+        # Stack frames in correct order: oldest -> newest
+        stacked_state = np.stack(
+            frame_history[::-1], axis=0
+        )  # Reverse to maintain order
+
+        return stacked_state  # Shape: (4, 84, 84)
 
     def usage(self):
         return round(len(self.buffer) / self.buffer_size, 3)

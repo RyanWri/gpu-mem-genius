@@ -1,3 +1,4 @@
+import csv
 import yaml
 import pandas as pd
 import torch
@@ -44,3 +45,9 @@ def save_checkpoint(agent, episode: int, save_options: str, dt: str):
 
 def load_checkpoint(agent: DQNAgent, checkpoint_path: str):
     agent.q_network.load_state_dict(torch.load(checkpoint_path))
+
+
+def write_loss_logs(loss_log_file, episode, step, loss_value):
+    with open(loss_log_file, "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([episode, step, loss_value])  # Save loss

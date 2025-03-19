@@ -1,5 +1,4 @@
 from collections import Counter
-import math
 import torch
 from scipy.stats import entropy
 from src.features.dnnmem import estimate_model_mb
@@ -16,18 +15,6 @@ def get_state_entropy(states):
     state_freq = Counter(states)
     freq_list = list(state_freq.values())
     return entropy(freq_list, base=2)
-
-
-# understand how well our agent explore his environment
-def get_exploration_rate(episode_number, epsilon_config):
-    epsilon_min, epsilon_max, decay_rate = (
-        epsilon_config["epsilon_min"],
-        epsilon_config["epsilon"],
-        epsilon_config["epsilon_decay"],
-    )
-    return epsilon_min + (epsilon_max - epsilon_min) * math.exp(
-        -decay_rate * episode_number
-    )
 
 
 def calculate_complexity_scores(game_id):

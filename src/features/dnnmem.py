@@ -33,7 +33,6 @@ def get_model_architecture(model):
 # - Multiply them to get the total bytes used by that parameter.
 # - Sum over all parameters to get total parameter memory usage.
 def estimate_model_mb(model):
-    get_model_architecture(model)
     model_size_bytes = estimate_model_size(model)
     model_size_mb = model_size_bytes / (1024**2)
     return model_size_mb
