@@ -1,14 +1,20 @@
+import csv
 from datetime import datetime
 import psutil
 import torch
 import time
 import logging
-from src.features.dnnmem import free_memory_if_needed
 from src.atari_env import make_env
-from src.features.collect import calc_agent_memory, get_exploration_rate
+from src.features.collect import calc_agent_memory
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
-from src.loaders import load_config, save_checkpoint, save_list_of_dicts_to_dataframe
+from src.loaders import (
+    load_checkpoint,
+    load_config,
+    save_checkpoint,
+    save_list_of_dicts_to_dataframe,
+    write_loss_logs,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -41,6 +47,12 @@ agent = DQNAgent(
     action_dim=env.action_space.n,
     config=config["agent"],
 )
+
+# load checkpoint if necessary
+if checkpoints["load_checkpoint"]:
+    logging.info("Loading checkpoint ...")
+    load_checkpoint(agent, checkpoints["checkpoint_path"])
+
 replay_buffer = ReplayBuffer(config["replay_buffer"])
 
 # hyperparameters
@@ -61,10 +73,22 @@ dataset = []
 dt = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+# handle loss
+loss_log_file = "loss_log.csv"
+
+# Open file & write header only once
+with open(loss_log_file, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Episode", "Step", "Loss"])  # Headers
+
+
+replay_start_size = 50000  # Minimum samples before training
+train_frequency = 4  # Train every 4 steps
+
 # main loop
 step = 0
-for episode in range(episodes):
-    logging.info(f"Starting episode {episode+1}/{episodes}")
+for episode in range(episodes + 1):
+    logging.info(f"Starting episode {episode}/{episodes+1}")
 
     # Modify Training Loop in `main.py`
     if episode % checkpoints["frequency"] == 0:
@@ -86,19 +110,20 @@ for episode in range(episodes):
         action = agent.select_action(state)
         next_state, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
-
-        if step % batch_size == 0:
-            # Train the agent every batch_size steps
-            agent.train(batch_size, replay_buffer)
-        if step % target_update_frequency == 0:
-            # Update target network every 1K steps
-            agent.update_target_network()
-
         # Add transition to replay buffer
-        replay_buffer.add(state, action, reward, next_state, done)
+        replay_buffer.add(state, action, reward, next_state, done, step)
         state = next_state
         total_reward += reward
         step += 1
+
+        # Train only if we have enough samples
+        if step > replay_start_size and step % train_frequency == 0:
+            batch = replay_buffer.sample(32)
+            loss = agent.train(batch)
+            write_loss_logs(loss_log_file, episode, step, loss)
+            agent.update_epsilon_greedy(step)
+            if step % target_update_frequency == 0:
+                agent.update_target_network()
 
     episode_time = time.time() - start_time
 
@@ -106,7 +131,7 @@ for episode in range(episodes):
     dynamic_features = {
         "episode_reward": total_reward,
         "episode_length": episode_time,
-        "exploration_rate": get_exploration_rate(episode, config["agent"]),
+        "exploration_rate": agent.get_exploration_rate(),
     }
 
     # Convert to MB
@@ -131,7 +156,5 @@ for episode in range(episodes):
         # save dataset as dataframe to disk
         logging.info("Saving dataset...")
         save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
-
-    free_memory_if_needed(replay_buffer, gpu_flush=False)
 
 logging.info("Training complete.")
