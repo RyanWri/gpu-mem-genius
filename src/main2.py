@@ -1,10 +1,7 @@
-import random
-import psutil
-import torch
 import time
 import logging
 from datetime import datetime
-from src.features.collect import calc_agent_memory
+from src.features.collect import calc_agent_memory, collect_resources
 from src.atari_env import make_env
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
@@ -54,22 +51,7 @@ def train_step(agent, replay_buffer, batch_size, step):
     """Perform a single training step, manage memory, and log loss."""
     if step % 4 == 0:
         loss = agent.train(replay_buffer, batch_size)
-        if random.random() < 0.001:
-            print(f"Loss at step {step}: {loss}")
     agent.update_epsilon_greedy(step)
-
-
-def log_step(
-    episode, total_reward, agent, step, episode_time, cpu_usage, gpu_before, gpu_after
-):
-    """Handles structured logging per episode."""
-    logging.info(
-        f"Episode: {episode}, Reward: {total_reward}, Steps: {step}, Time: {episode_time:.2f}s"
-    )
-    logging.info(
-        f"CPU Usage: {cpu_usage}MB, GPU Before: {gpu_before:.2f}MB, GPU After: {gpu_after:.2f}MB"
-    )
-    logging.info(f"Exploration Rate: {agent.get_exploration_rate():.4f}")
 
 
 def checkpoint_manager(agent, episode, checkpoints, save_options, dt):
@@ -85,7 +67,7 @@ def training_loop(env, agent, replay_buffer, config):
     target_update_frequency = config["environment"]["target_update_frequency"]
     checkpoints = config["checkpoints"]
     save_options = config["save_options"]
-    replay_start_size = 50000  # Minimum samples before training
+    replay_start_size = 10000  # Minimum samples before training
 
     dataset = []
     dt = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -107,11 +89,6 @@ def training_loop(env, agent, replay_buffer, config):
         total_reward = 0
         start_time = time.time()
         done = False
-
-        gpu_before_train = (
-            torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-        )
-
         while not done:
             action = agent.select_action(replay_buffer.get_stacked_state(state), step)
             next_state, reward, terminated, truncated, info = env.step(action)
@@ -125,30 +102,19 @@ def training_loop(env, agent, replay_buffer, config):
             replay_buffer.add(state, action, reward, next_state, done, step)
             state = next_state
             total_reward += reward
+
+            if step % 1000 == 0:
+                logging.info(f"Step {step}: collecting resources...")
+                duration = time.time()
+                features = collect_and_log_features(
+                    step,
+                    agent,
+                    duration=duration - start_time,
+                    static_features=static_features,
+                )
+                dataset.append(features)
+                start_time = duration
             step += 1
-
-        episode_time = time.time() - start_time
-        gpu_after_train = (
-            torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-        )
-        cpu_usage = psutil.virtual_memory().used / 1e6  # Convert to MB
-
-        log_step(
-            episode,
-            total_reward,
-            agent,
-            step,
-            episode_time,
-            cpu_usage,
-            gpu_before_train,
-            gpu_after_train,
-        )
-
-        # Append to dataset
-        episode_features = collect_and_log_features(
-            episode, total_reward, agent, start_time, gpu_before_train, static_features
-        )
-        dataset.append(episode_features)
 
         if episode % checkpoints["data"] == 0:
             logging.info("Saving dataset...")
@@ -157,37 +123,15 @@ def training_loop(env, agent, replay_buffer, config):
     logging.info("Training complete.")
 
 
-def collect_and_log_features(
-    episode, total_reward, agent, start_time, gpu_before_train, static_features
-):
-    """Collects dynamic training features and appends them to the dataset."""
-    episode_time = time.time() - start_time
-
-    # Dynamic episode features
+def collect_and_log_features(step, agent, duration, static_features):
+    resources_metrics = collect_resources(replay_buffer, step)
     dynamic_features = {
-        "episode_reward": total_reward,
-        "episode_length": episode_time,
+        "duration": duration,
         "exploration_rate": agent.get_exploration_rate(),
     }
-
-    # Convert GPU memory usage to MB
-    gpu_after_train = (
-        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-    )
-
-    # CPU memory usage in MB
-    cpu_usage = psutil.virtual_memory().used / 1e6
-
-    # Memory usage features
-    memory_features = {
-        "gpu_before_train": gpu_before_train,
-        "gpu_after_train": gpu_after_train,
-        "cpu_usage": cpu_usage,
-    }
-
     # Merge all features (static + dynamic + memory)
-    episode_features = {**static_features, **dynamic_features, **memory_features}
-    return episode_features
+    features = {**static_features, **dynamic_features, **resources_metrics}
+    return features
 
 
 if __name__ == "__main__":

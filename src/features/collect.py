@@ -1,7 +1,7 @@
-from collections import Counter
 import torch
-from scipy.stats import entropy
+from src.replay_buffer import ReplayBuffer
 from src.features.dnnmem import estimate_model_mb
+import psutil
 
 
 # need to use dnnmem to calculate layers and weights
@@ -10,34 +10,36 @@ def calc_agent_memory(agent):
     return estimated_size
 
 
-# learn distribution of states
-def get_state_entropy(states):
-    state_freq = Counter(states)
-    freq_list = list(state_freq.values())
-    return entropy(freq_list, base=2)
-
-
-def calculate_complexity_scores(game_id):
-    """
-    need to implement game complexity based on environment and rules
-    """
-    rules_complexity = calculate_rules_complexity(game_id)
-    pass
-
-
-def calculate_rules_complexity(game_id):
-    # This is a simplistic manual mapping, and you should adjust it based on your game analysis
-    complexity_mapping = {
-        "ALE/Pong-v5": 1,
-        "ALE/MontezumasRevenge-v5": 5,
-        "ALE/MsPacman-v5": 3,
-        "ALE/Hero-v5": 4,
-        # Add more games as needed
+def get_gpu_metrics(device=0):
+    if not torch.cuda.is_available():
+        return {}
+    allocated_mb = torch.cuda.memory_allocated(device) / (1024**2)
+    reserved_mb = torch.cuda.memory_reserved(device) / (1024**2)
+    total_mb = torch.cuda.get_device_properties(device).total_memory / (1024**2)
+    return {
+        "gpu_allocated_mb": allocated_mb,
+        "gpu_reserved_mb": reserved_mb,
+        "gpu_total_mb": total_mb,
+        "gpu_usage_percent": 100.0 * reserved_mb / total_mb,
     }
-    return complexity_mapping.get(game_id, 1)  # Default to 1 if game not listed
 
 
-def collect_gpu_metrics():
-    allocated = torch.cuda.memory_allocated() / 1e6
-    reserved = torch.cuda.memory_reserved() / 1e6
-    max_allocated = torch.cuda.max_memory_allocated() / 1e6
+def get_cpu_metrics():
+    return {
+        "cpu_percent": psutil.cpu_percent(interval=1),
+        "cpu_memory_used_mb": psutil.virtual_memory().used / (1024**2),
+        "cpu_memory_percent": psutil.virtual_memory().percent,
+    }
+
+
+def collect_resources(replay_buffer: ReplayBuffer, training_step: int):
+    cpu_stats = get_cpu_metrics()
+    gpu_stats = get_gpu_metrics()
+    buffer_stats = replay_buffer.memory_usage()
+
+    return {
+        "step": training_step,
+        **cpu_stats,
+        **gpu_stats,
+        **buffer_stats,
+    }

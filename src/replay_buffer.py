@@ -10,77 +10,80 @@ class ReplayBuffer:
         self.buffer_size = config["buffer_size"]
         self.buffer = deque(maxlen=self.buffer_size)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.gpu_buffer = None  # Holds experiences on GPU
-        self.gpu_buffer_size = 0  # Tracks how many experiences are in GPU
-        self.transfer_interval = 50000  # Transfer every 50k steps
-        self.max_gpu_samples = 300000  # Limit GPU buffer to ~6GB usage
-        self.cpu_memory_threshold = 85  # Reduce memory usage when CPU exceeds 85%
+        self.gpu_buffer = None
+        self.gpu_buffer_size = 0
+        self.transfer_interval = 5000
+        self.max_gpu_samples = 100000
+        self.cpu_memory_threshold = 85
 
     def add(self, state, action, reward, next_state, done, step):
-        """Store a transition (state, action, reward, next_state, done) in the CPU buffer."""
         reward = np.clip(reward, -1, 1)
         self.buffer.append((state, action, reward, next_state, done))
-
-        # Every 50k steps, transfer 50k samples to GPU
         if (
             step % self.transfer_interval == 0
             and len(self.buffer) >= self.transfer_interval
         ):
             if self.device == "cuda":
                 self.transfer_to_gpu()
-
-        # Monitor CPU memory and free resources if usage exceeds 85%
         self.check_cpu_memory()
 
     def transfer_to_gpu(self):
-        """Move a batch of 50k transitions from CPU to GPU if memory allows."""
-        if len(self.buffer) < self.transfer_interval:
-            return  # Not enough samples to transfer
+        """Transfers experiences to GPU, prioritizing last 50,000 samples if memory is limited."""
 
-        print("[INFO] Checking GPU memory before transfer...")
+        if len(self.buffer) == 0:
+            print("[WARNING] Buffer is empty, nothing to transfer.")
+            return
+
         torch.cuda.synchronize()
-        free_mem = torch.cuda.memory_allocated() / 1e9  # Convert to GB
-        print(f"[INFO] Free GPU Memory: {free_mem:.2f} GB")
 
-        # Check if we have enough VRAM for transfer (~1GB per 50k samples)
-        if free_mem > 9:  # Keep ~3GB free for computations
-            print("[WARNING] GPU memory is running low, clearing some GPU buffer...")
-            self.clear_gpu_buffer()
+        free_mem = torch.cuda.memory_reserved() / 1e9  # Convert to GB
+        total_mem = torch.cuda.get_device_properties(0).total_memory / 1e9  # Total VRAM
+        used_mem = total_mem - free_mem
 
-        # Transfer 50k samples from CPU to GPU
-        print("[INFO] Transferring 50k experiences to GPU...")
-        sample_indices = np.random.choice(len(self.buffer), 50000, replace=False)
-        sampled_experiences = [self.buffer[i] for i in sample_indices]
+        print(
+            f"[INFO] GPU Memory - Total: {total_mem:.2f} GB, Used: {used_mem:.2f} GB, Free: {free_mem:.2f} GB"
+        )
+
+        # Decide transfer size based on available VRAM
+        if free_mem > total_mem * 0.5:
+            transfer_size = len(self.buffer)  # Transfer entire buffer
+        else:
+            transfer_size = min(50000, len(self.buffer))  # Transfer last 50,000 samples
+
+        print(f"[INFO] Transferring {transfer_size} experiences to GPU...")
+
+        # Fetch the last `transfer_size` experiences
+        sampled_experiences = list(self.buffer)[-transfer_size:]
 
         # Convert to tensors and move to GPU
         states, actions, rewards, next_states, dones = zip(*sampled_experiences)
         self.gpu_buffer = (
-            torch.tensor(np.array(states), dtype=torch.float32).to(self.device),
+            torch.tensor(np.array(states), dtype=torch.uint8).to(self.device),
             torch.tensor(np.array(actions), dtype=torch.int64)
             .unsqueeze(1)
             .to(self.device),
             torch.tensor(np.array(rewards), dtype=torch.float32)
             .unsqueeze(1)
             .to(self.device),
-            torch.tensor(np.array(next_states), dtype=torch.float32).to(self.device),
+            torch.tensor(np.array(next_states), dtype=torch.uint8).to(self.device),
             torch.tensor(np.array(dones), dtype=torch.float32)
             .unsqueeze(1)
             .to(self.device),
         )
-        self.gpu_buffer_size = len(sample_indices)
+
+        self.gpu_buffer_size = transfer_size
+        print(f"[INFO] Successfully transferred {transfer_size} samples to GPU.")
 
     def clear_gpu_buffer(self):
         """Clears the GPU buffer to free memory if needed."""
         self.gpu_buffer = None
         self.gpu_buffer_size = 0
         torch.cuda.empty_cache()
-        print("[INFO] Cleared GPU buffer to free memory.")
 
     def check_cpu_memory(self):
         """Monitor CPU memory usage and reduce memory if usage exceeds 85%."""
         cpu_usage = psutil.virtual_memory().percent
         if cpu_usage > self.cpu_memory_threshold:
-            print(f"[WARNING] CPU memory is at {cpu_usage}%, freeing resources...")
             self.reduce_memory_usage()
 
     def reduce_memory_usage(self):
@@ -96,11 +99,21 @@ class ReplayBuffer:
             torch.cuda.empty_cache()
             self.transfer_to_gpu()
 
-        print("[INFO] Reduced buffer size and cleared cache. CPU memory freed.")
-
     def sample(self, batch_size):
+        if (
+            self.device == "cuda"
+            and self.gpu_buffer is not None
+            and self.gpu_buffer_size > 0
+        ):
+            return self.sample_gpu_buffer(batch_size)
+
+        return self.sample_cpu_buffer(batch_size)
+
+    def sample_cpu_buffer(self, batch_size):
         """Sample batch from replay buffer and stack frames correctly"""
-        valid_indices = [i for i in range(len(self.buffer) - 4) if not self.buffer[i + 3][4]]  # Ensure episode continuity
+        valid_indices = [
+            i for i in range(len(self.buffer) - 4) if not self.buffer[i + 3][4]
+        ]  # Ensure episode continuity
         indices = np.random.choice(valid_indices, batch_size, replace=False)
         states, actions, rewards, next_states, dones = [], [], [], [], []
         for idx in indices:
@@ -132,6 +145,36 @@ class ReplayBuffer:
             .unsqueeze(1)
             .to(self.device),
         )
+
+    def sample_gpu_buffer(self, batch_size):
+        """Samples a batch from the GPU buffer efficiently using tensor indexing.
+
+        Parameters:
+            batch_size (int): Number of samples to retrieve.
+
+        Returns:
+            Tuple of Tensors (states, actions, rewards, next_states, dones) on GPU.
+        """
+        if self.gpu_buffer is None or self.gpu_buffer_size == 0:
+            print("[WARNING] GPU buffer is empty. Cannot sample.")
+            return None
+
+        if batch_size > self.gpu_buffer_size:
+            batch_size = self.gpu_buffer_size  # Prevent oversampling
+
+        # Generate random indices for sampling
+        indices = torch.randint(
+            0, self.gpu_buffer_size, (batch_size,), device=self.device
+        )
+
+        # Sample directly from GPU buffer using indexing
+        states = self.gpu_buffer[0][indices]
+        actions = self.gpu_buffer[1][indices]
+        rewards = self.gpu_buffer[2][indices]
+        next_states = self.gpu_buffer[3][indices]
+        dones = self.gpu_buffer[4][indices]
+
+        return states, actions, rewards, next_states, dones
 
     def get_stacked_state(self, current_state):
         frame_history = [current_state]  # Start with the latest frame
@@ -168,4 +211,25 @@ class ReplayBuffer:
         self.buffer.clear()
         gc.collect()
         torch.cuda.empty_cache()
-        print("[INFO] Cleared entire buffer and freed memory.")
+
+    def memory_usage(self):
+        buffer_current_size_bytes = sum(
+            state.nbytes
+            + next_state.nbytes
+            + np.array(action).nbytes
+            + np.array(reward).nbytes
+            + np.array(done).nbytes
+            for state, action, reward, next_state, done in self.buffer
+        )
+
+        buffer_max_size_bytes = (
+            self.buffer_size * buffer_current_size_bytes / max(len(self.buffer), 1)
+        )
+
+        return {
+            "buffer_current_usage_mb": buffer_current_size_bytes / (1024**2),
+            "buffer_max_usage_mb": buffer_max_size_bytes / (1024**2),
+            "buffer_usage_percent": (len(self.buffer) / self.buffer_size) * 100,
+            "buffer_current_size": len(self.buffer),
+            "buffer_max_size": self.buffer_size,
+        }

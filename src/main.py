@@ -93,8 +93,6 @@ for episode in range(episodes + 1):
     # Modify Training Loop in `main.py`
     if episode % checkpoints["frequency"] == 0:
         save_checkpoint(agent, episode, save_options, dt)
-    if episode % 5 == 0:
-        print(f"Replay Buffer Size: {len(replay_buffer.buffer)}")
     # first step of an episode
     state, info = env.reset()
     total_reward = 0

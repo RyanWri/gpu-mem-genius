@@ -88,16 +88,10 @@ class DQNAgent:
         mean_q = q_values.mean().item()
         max_q = q_values.max().item()
         min_q = q_values.min().item()
-        print(
-            f"Loss: {loss.item():.4f} | Mean Q: {mean_q:.2f} | Max Q: {max_q:.2f} | Min Q: {min_q:.2f}"
-        )
-
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         self.optimizer.step()
-
-        del states, actions, rewards, next_states, dones
         return loss.item()
 
     def update_target_network(self):
