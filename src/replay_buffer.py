@@ -100,7 +100,8 @@ class ReplayBuffer:
 
     def sample(self, batch_size):
         """Sample batch from replay buffer and stack frames correctly"""
-        indices = np.random.choice(len(self.buffer) - 3, batch_size, replace=False)
+        valid_indices = [i for i in range(len(self.buffer) - 4) if not self.buffer[i + 3][4]]  # Ensure episode continuity
+        indices = np.random.choice(valid_indices, batch_size, replace=False)
         states, actions, rewards, next_states, dones = [], [], [], [], []
         for idx in indices:
             # Stack 4 consecutive frames to form a state

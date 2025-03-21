@@ -55,7 +55,7 @@ class DQNAgent:
             lr=self.lr,
             alpha=0.95,  # RMSProp decay factor
             eps=0.01,  # Epsilon for numerical stability
-            momentum=0.95,  # Momentum term, as suggested by the paper
+            momentum=0.0,  # Momentum term, as suggested by the paper
         )
         self.loss_fn = nn.SmoothL1Loss()
 

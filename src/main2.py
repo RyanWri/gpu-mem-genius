@@ -191,5 +191,5 @@ def collect_and_log_features(
 
 
 if __name__ == "__main__":
-    env, agent, replay_buffer, config = initialize_training(game_id="freeway")
+    env, agent, replay_buffer, config = initialize_training(game_id="pong")
     training_loop(env, agent, replay_buffer, config)
