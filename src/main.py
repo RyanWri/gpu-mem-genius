@@ -1,11 +1,8 @@
-import csv
-from datetime import datetime
-import psutil
-import torch
 import time
 import logging
+from datetime import datetime
+from src.features.collect import calc_agent_memory, collect_resources
 from src.atari_env import make_env
-from src.features.collect import calc_agent_memory
 from src.agents.dqn_agent import DQNAgent
 from src.replay_buffer import ReplayBuffer
 from src.loaders import (
@@ -13,148 +10,131 @@ from src.loaders import (
     load_config,
     save_checkpoint,
     save_list_of_dicts_to_dataframe,
-    write_loss_logs,
 )
 
-# Setup logging
+# Logging Setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.FileHandler("training.log")],
 )
 
-# load configuration
-logging.info("Loading configuration...")
-experiment_game = "pong"
-config_filename = f"src/configurations/experiment_{experiment_game}.yaml"
-config = load_config(config_filename)
-episodes = config["environment"]["episodes"]
-save_options = config["save_options"]
-checkpoints = config["checkpoints"]
 
-# register atari game
-logging.info(f"Registering environment: {config['environment']['game_name']}")
-env = make_env(
-    config["environment"]["game_name"],
-    config["environment"]["render_mode"],
-    config["environment"]["obs_type"],
-)
+def initialize_training(conf_file="pong"):
+    """Initialize environment, agent, replay buffer, and configurations."""
+    logging.info("Loading configuration...")
+    config_filename = f"src/configurations/experiment_{conf_file}.yaml"
+    config = load_config(config_filename)
 
-# build agent and replay buffer
-# remember to pass channel first for state dim
-agent = DQNAgent(
-    state_dim=env.observation_space.shape,
-    action_dim=env.action_space.n,
-    config=config["agent"],
-)
+    env = make_env(
+        config["environment"]["game_name"],
+        config["environment"]["render_mode"],
+        config["environment"]["obs_type"],
+    )
 
-# load checkpoint if necessary
-if checkpoints["load_checkpoint"]:
-    logging.info("Loading checkpoint ...")
-    load_checkpoint(agent, checkpoints["checkpoint_path"])
+    agent = DQNAgent(
+        state_dim=4,
+        action_dim=env.action_space.n,
+        config=config["agent"],
+    )
 
-replay_buffer = ReplayBuffer(config["replay_buffer"])
+    if config["checkpoints"]["load_checkpoint"]:
+        logging.info("Loading checkpoint ...")
+        load_checkpoint(agent, config["checkpoints"]["checkpoint_path"])
 
-# hyperparameters
-batch_size = config["environment"]["batch_size"]
-target_update_frequency = config["environment"]["target_update_frequency"]
-
-agent_hidden_model_memory = calc_agent_memory(agent.get_hidden_model())
-
-# collect static features
-static_features = {
-    "game_name": config["environment"]["game_name"],
-    "state_dim": env.observation_space.shape,
-    "action_dim": env.action_space.n,
-    "agent_hidden_model_size": agent_hidden_model_memory,
-}
-
-dataset = []
-dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+    replay_buffer = ReplayBuffer(config["replay_buffer"])
+    return env, agent, replay_buffer, config
 
 
-# handle loss
-loss_log_file = "loss_log.csv"
-
-# Open file & write header only once
-with open(loss_log_file, "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["Episode", "Step", "Loss"])  # Headers
+def train_step(agent, replay_buffer, batch_size, step):
+    """Perform a single training step, manage memory, and log loss."""
+    if step % 4 == 0:
+        loss = agent.train(replay_buffer, batch_size)
+    agent.update_epsilon_greedy(step)
 
 
-replay_start_size = 50000  # Minimum samples before training
-train_frequency = 4  # Train every 4 steps
-
-# main loop
-step = 0
-for episode in range(episodes + 1):
-    logging.info(f"Starting episode {episode}/{episodes+1}")
-
-    # Modify Training Loop in `main.py`
+def checkpoint_manager(agent, episode, checkpoints, save_options, dt):
+    """Saves agent checkpoints periodically."""
     if episode % checkpoints["frequency"] == 0:
         save_checkpoint(agent, episode, save_options, dt)
-    # first step of an episode
-    state, info = env.reset()
-    total_reward = 0
-    # measure episode time
-    start_time = time.time()
-    # run episode till truncated or terminated
-    done = False
 
-    # Convert to MB
-    gpu_before_train = (
-        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-    )
 
-    while not done:
-        action = agent.select_action(state)
-        next_state, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        # Add transition to replay buffer
-        replay_buffer.add(state, action, reward, next_state, done, step)
-        state = next_state
-        total_reward += reward
-        step += 1
+def training_loop(env, agent, replay_buffer, config):
+    """Main training loop handling episodes and logging."""
+    episodes = config["environment"]["episodes"]
+    batch_size = config["environment"]["batch_size"]
+    target_update_frequency = config["environment"]["target_update_frequency"]
+    checkpoints = config["checkpoints"]
+    save_options = config["save_options"]
+    replay_start_size = 10000  # Minimum samples before training
 
-        # Train only if we have enough samples
-        if step > replay_start_size and step % train_frequency == 0:
-            batch = replay_buffer.sample(32)
-            loss = agent.train(batch)
-            write_loss_logs(loss_log_file, episode, step, loss)
-            agent.update_epsilon_greedy(step)
-            if step % target_update_frequency == 0:
-                agent.update_target_network()
+    dataset = []
+    dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # collect static features
+    static_features = {
+        "game_name": config["environment"]["game_name"],
+        "state_dim": env.observation_space.shape,
+        "action_dim": env.action_space.n,
+        "agent_hidden_model_size": calc_agent_memory(agent.get_hidden_model()),
+    }
 
-    episode_time = time.time() - start_time
+    step = 0
+    for episode in range(episodes + 1):
+        logging.info(f"Starting episode {episode}/{episodes+1}")
 
-    # dynamic features collected at the end of each episode should be inserted here
+        checkpoint_manager(agent, episode, checkpoints, save_options, dt)
+
+        state, info = env.reset()
+        total_reward = 0
+        start_time = time.time()
+        done = False
+        while not done:
+            action = agent.select_action(replay_buffer.get_stacked_state(state), step)
+            next_state, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+
+            if replay_buffer.get_current_size() >= replay_start_size:
+                train_step(agent, replay_buffer, batch_size, step)
+                if step % target_update_frequency == 0:
+                    agent.update_target_network()
+
+            replay_buffer.add(state, action, reward, next_state, done, step)
+            state = next_state
+            total_reward += reward
+
+            if step % 1000 == 0:
+                logging.info(f"Step {step}: collecting resources...")
+                duration = time.time()
+                features = collect_and_log_features(
+                    step,
+                    agent,
+                    duration=duration - start_time,
+                    static_features=static_features,
+                )
+                dataset.append(features)
+                start_time = duration
+
+            if step % checkpoints["steps"] == 0:
+                logging.info("Saving dataset...")
+                save_list_of_dicts_to_dataframe(dataset, save_options, dt)
+
+            step += 1
+
+    logging.info("Training complete.")
+
+
+def collect_and_log_features(step, agent, duration, static_features):
+    resources_metrics = collect_resources(replay_buffer, step)
     dynamic_features = {
-        "episode_reward": total_reward,
-        "episode_length": episode_time,
+        "duration": duration,
         "exploration_rate": agent.get_exploration_rate(),
     }
+    # Merge all features (static + dynamic + memory)
+    features = {**static_features, **dynamic_features, **resources_metrics}
+    return features
 
-    # Convert to MB
-    gpu_after_train = (
-        torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
-    )
 
-    # CPU memory
-    cpu_usage = psutil.virtual_memory().used / 1e6  # MB
-
-    memory_features = {
-        "gpu_before_train": gpu_before_train,
-        "gpu_after_train": gpu_after_train,
-        "cpu_usage": cpu_usage,
-    }
-
-    # Merge static and dynamic features
-    episode_features = {**static_features, **dynamic_features, **memory_features}
-    dataset.append(episode_features)
-
-    if episode % checkpoints["data"] == 0:
-        # save dataset as dataframe to disk
-        logging.info("Saving dataset...")
-        save_list_of_dicts_to_dataframe(dataset, save_options, dt=dt)
-
-logging.info("Training complete.")
+if __name__ == "__main__":
+    conf_file = "pong_vm"
+    env, agent, replay_buffer, config = initialize_training(conf_file)
+    training_loop(env, agent, replay_buffer, config)

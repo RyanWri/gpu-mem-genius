@@ -3,6 +3,14 @@ import torch
 import numpy as np
 from collections import deque
 import psutil  # For checking memory usage
+import logging
+
+# Logging Setup
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("training.log")],
+)
 
 
 class ReplayBuffer:
@@ -12,45 +20,33 @@ class ReplayBuffer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.gpu_buffer = None
         self.gpu_buffer_size = 0
-        self.transfer_interval = 5000
-        self.max_gpu_samples = 100000
+        self.transfer_interval = 10000
         self.cpu_memory_threshold = 85
 
     def add(self, state, action, reward, next_state, done, step):
         reward = np.clip(reward, -1, 1)
         self.buffer.append((state, action, reward, next_state, done))
         if (
-            step % self.transfer_interval == 0
+            self.device.type == "cuda"
+            and step % self.transfer_interval == 0
             and len(self.buffer) >= self.transfer_interval
         ):
-            if self.device == "cuda":
-                self.transfer_to_gpu()
+            logging.info("transferring buffer to gpu")
+            self.transfer_to_gpu()
         self.check_cpu_memory()
 
     def transfer_to_gpu(self):
         """Transfers experiences to GPU, prioritizing last 50,000 samples if memory is limited."""
 
         if len(self.buffer) == 0:
-            print("[WARNING] Buffer is empty, nothing to transfer.")
+            logging.info("[WARNING] Buffer is empty, nothing to transfer.")
             return
 
         torch.cuda.synchronize()
-
-        free_mem = torch.cuda.memory_reserved() / 1e9  # Convert to GB
-        total_mem = torch.cuda.get_device_properties(0).total_memory / 1e9  # Total VRAM
-        used_mem = total_mem - free_mem
-
-        print(
-            f"[INFO] GPU Memory - Total: {total_mem:.2f} GB, Used: {used_mem:.2f} GB, Free: {free_mem:.2f} GB"
-        )
-
-        # Decide transfer size based on available VRAM
-        if free_mem > total_mem * 0.5:
-            transfer_size = len(self.buffer)  # Transfer entire buffer
-        else:
-            transfer_size = min(50000, len(self.buffer))  # Transfer last 50,000 samples
-
-        print(f"[INFO] Transferring {transfer_size} experiences to GPU...")
+        # Clear GPU buffer before transferring to avoid stacking
+        self.clear_gpu_buffer()
+        transfer_size = len(self.buffer)
+        logging.info(f"[INFO] Transferring {transfer_size} experiences to GPU...")
 
         # Fetch the last `transfer_size` experiences
         sampled_experiences = list(self.buffer)[-transfer_size:]
@@ -72,7 +68,7 @@ class ReplayBuffer:
         )
 
         self.gpu_buffer_size = transfer_size
-        print(f"[INFO] Successfully transferred {transfer_size} samples to GPU.")
+        logging.info(f"[INFO] Successfully transferred {transfer_size} samples to GPU.")
 
     def clear_gpu_buffer(self):
         """Clears the GPU buffer to free memory if needed."""
@@ -101,7 +97,7 @@ class ReplayBuffer:
 
     def sample(self, batch_size):
         if (
-            self.device == "cuda"
+            self.device.type == "cuda"
             and self.gpu_buffer is not None
             and self.gpu_buffer_size > 0
         ):
@@ -156,7 +152,7 @@ class ReplayBuffer:
             Tuple of Tensors (states, actions, rewards, next_states, dones) on GPU.
         """
         if self.gpu_buffer is None or self.gpu_buffer_size == 0:
-            print("[WARNING] GPU buffer is empty. Cannot sample.")
+            logging.info("[WARNING] GPU buffer is empty. Cannot sample.")
             return None
 
         if batch_size > self.gpu_buffer_size:
@@ -164,14 +160,19 @@ class ReplayBuffer:
 
         # Generate random indices for sampling
         indices = torch.randint(
-            0, self.gpu_buffer_size, (batch_size,), device=self.device
+            0, self.gpu_buffer_size - 3, (batch_size,), device=self.device
         )
 
-        # Sample directly from GPU buffer using indexing
-        states = self.gpu_buffer[0][indices]
+        # Stack 4 consecutive frames to form a state
+        states = torch.stack(
+            [self.gpu_buffer[0][indices + i] for i in range(4)], dim=1
+        )  # (batch_size, 4, 84, 84)
+        next_states = torch.stack(
+            [self.gpu_buffer[3][indices + i] for i in range(4)], dim=1
+        )  # (batch_size, 4, 84, 84)
+
         actions = self.gpu_buffer[1][indices]
         rewards = self.gpu_buffer[2][indices]
-        next_states = self.gpu_buffer[3][indices]
         dones = self.gpu_buffer[4][indices]
 
         return states, actions, rewards, next_states, dones
