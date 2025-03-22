@@ -2,7 +2,6 @@ import gc
 import torch
 import numpy as np
 from collections import deque
-import psutil  # For checking memory usage
 import logging
 
 # Logging Setup
@@ -33,7 +32,6 @@ class ReplayBuffer:
         ):
             logging.info("transferring buffer to gpu")
             self.transfer_to_gpu()
-        self.check_cpu_memory()
 
     def transfer_to_gpu(self):
         """Transfers experiences to GPU, prioritizing last 50,000 samples if memory is limited."""
@@ -75,25 +73,6 @@ class ReplayBuffer:
         self.gpu_buffer = None
         self.gpu_buffer_size = 0
         torch.cuda.empty_cache()
-
-    def check_cpu_memory(self):
-        """Monitor CPU memory usage and reduce memory if usage exceeds 85%."""
-        cpu_usage = psutil.virtual_memory().percent
-        if cpu_usage > self.cpu_memory_threshold:
-            self.reduce_memory_usage()
-
-    def reduce_memory_usage(self):
-        """Free unused CPU memory by reducing buffer size and running garbage collection."""
-        num_to_remove = int(len(self.buffer) * 0.5)
-        for _ in range(num_to_remove):
-            self.buffer.popleft()
-        # Run garbage collection
-        gc.collect()
-
-        # Free unused PyTorch memory
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-            self.transfer_to_gpu()
 
     def sample(self, batch_size):
         if (

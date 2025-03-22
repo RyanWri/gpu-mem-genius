@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 
 
-def initialize_training(conf_file="pong"):
+def initialize_training(conf_file):
     """Initialize environment, agent, replay buffer, and configurations."""
     logging.info("Loading configuration...")
     config_filename = f"src/configurations/experiment_{conf_file}.yaml"
@@ -53,10 +53,10 @@ def train_step(agent, replay_buffer, batch_size, step):
     agent.update_epsilon_greedy(step)
 
 
-def checkpoint_manager(agent, episode, checkpoints, save_options, dt):
+def checkpoint_manager(agent, episode, save_options, dt):
     """Saves agent checkpoints periodically."""
-    if episode % checkpoints["frequency"] == 0:
-        save_checkpoint(agent, episode, save_options, dt)
+    logging.info(f"saving checkpoint {episode}")
+    save_checkpoint(agent, episode, save_options, dt)
 
 
 def training_loop(env, agent, replay_buffer, config):
@@ -81,9 +81,8 @@ def training_loop(env, agent, replay_buffer, config):
     step = 0
     for episode in range(episodes + 1):
         logging.info(f"Starting episode {episode}/{episodes+1}")
-
-        checkpoint_manager(agent, episode, checkpoints, save_options, dt)
-
+        if episode % checkpoints["frequency"] == 0:
+            checkpoint_manager(agent, episode, save_options, dt)
         state, info = env.reset()
         total_reward = 0
         start_time = time.time()
@@ -135,6 +134,7 @@ def collect_and_log_features(step, agent, duration, static_features):
 
 
 if __name__ == "__main__":
-    conf_file = "pong_vm"
+    experiments = ["pong_vm", "enduro_vm", "seaquest_vm"]
+    conf_file = experiments[1]
     env, agent, replay_buffer, config = initialize_training(conf_file)
     training_loop(env, agent, replay_buffer, config)
