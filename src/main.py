@@ -61,7 +61,7 @@ def checkpoint_manager(agent, episode, save_options, dt):
 
 def training_loop(env, agent, replay_buffer, config):
     """Main training loop handling episodes and logging."""
-    episodes = config["environment"]["episodes"]
+    episodes = config["environment"]["steps"]
     batch_size = config["environment"]["batch_size"]
     target_update_frequency = config["environment"]["target_update_frequency"]
     checkpoints = config["checkpoints"]
@@ -79,15 +79,14 @@ def training_loop(env, agent, replay_buffer, config):
     }
 
     step = 0
-    for episode in range(episodes + 1):
-        logging.info(f"Starting episode {episode}/{episodes+1}")
-        if episode % checkpoints["frequency"] == 0:
-            checkpoint_manager(agent, episode, save_options, dt)
+    while step < episodes + 1:
         state, info = env.reset()
         total_reward = 0
         start_time = time.time()
         done = False
         while not done:
+            if step % checkpoints["frequency"] == 0:
+                checkpoint_manager(agent, step, save_options, dt)
             action = agent.select_action(replay_buffer.get_stacked_state(state), step)
             next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
@@ -135,6 +134,6 @@ def collect_and_log_features(step, agent, duration, static_features):
 
 if __name__ == "__main__":
     experiments = ["pong_vm", "enduro_vm", "seaquest_vm"]
-    conf_file = experiments[1]
+    conf_file = experiments[2]
     env, agent, replay_buffer, config = initialize_training(conf_file)
     training_loop(env, agent, replay_buffer, config)

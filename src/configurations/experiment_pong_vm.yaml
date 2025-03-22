@@ -15,14 +15,14 @@ environment:
   render_mode: "rgb_array"   # Render mode (e.g., "human", "rgb_array", etc')
   obs_type: "grayscale"      # Observation type (e.g., "grayscale", "rgb", etc')
   max_steps: 10000           # Maximum steps per episode
-  episodes: 500            # Increased episodes to match original training time
+  steps: 450000            # Increased episodes to match original training time
   batch_size: 32             # Matches paper
   target_update_frequency: 10000  # Update target network every 10,000 steps
 
 checkpoints:
   load_checkpoint: False  # Enables resuming training
   checkpoint_path: "/home/linuxu/datasets/atari-mem/Pong-v5/20250315_215738/dqn_checkpoint_900.pth"  # Specify latest checkpoint
-  frequency: 100
+  frequency: 90000
   steps: 18000
 
 save_options: 
