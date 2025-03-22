@@ -16,11 +16,14 @@ def get_gpu_metrics(device=0):
     allocated_mb = torch.cuda.memory_allocated(device) / (1024**2)
     reserved_mb = torch.cuda.memory_reserved(device) / (1024**2)
     total_mb = torch.cuda.get_device_properties(device).total_memory / (1024**2)
+    free_mb = total_mb - reserved_mb  # Actual free memory
+
     return {
         "gpu_allocated_mb": allocated_mb,
         "gpu_reserved_mb": reserved_mb,
         "gpu_total_mb": total_mb,
-        "gpu_usage_percent": 100.0 * reserved_mb / total_mb,
+        "gpu_free_mb": free_mb,
+        "gpu_usage_percent": 100.0 * allocated_mb / total_mb,
     }
 
 
