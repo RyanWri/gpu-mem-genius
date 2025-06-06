@@ -19,3 +19,4 @@ pandas
 pyyaml
 ipykernel
 opencv-python
+scikit-learn<=1.4.0
