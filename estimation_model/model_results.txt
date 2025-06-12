@@ -1,0 +1,3 @@
+MAE: Mean=8.020 MB, Std=0.590
+RMSE: Mean=11.512 MB, Std=0.733
+R²: Mean=0.999879, Std=0.000018
