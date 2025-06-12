@@ -114,7 +114,7 @@ print(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}")
 print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
 print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
 
-with open('estimation_model/model_results.txt', 'w') as f:
+with open("estimation_model/model_results.txt", "w") as f:
     f.write(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}\n")
     f.write(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}\n")
     f.write(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}\n")
