@@ -4,6 +4,7 @@ from diagrams.aws.ml import SagemakerModel, MachineLearning
 from diagrams.onprem.client import User
 from diagrams.onprem.certificates import CertManager
 
+
 def rl_system_architecture(filename="rl_system_architecture"):
     with Diagram(
         "RL System Architecture",
@@ -27,7 +28,9 @@ def rl_system_architecture(filename="rl_system_architecture"):
 
         # Replay Buffer cluster
         with Cluster("Replay Buffer"):
-            experience = Database("Experience\n(state, action, reward, next_state, done)")
+            experience = Database(
+                "Experience\n(state, action, reward, next_state, done)"
+            )
 
         # Forecast Engine cluster
         with Cluster("Forecast Engine"):
@@ -35,14 +38,30 @@ def rl_system_architecture(filename="rl_system_architecture"):
             forecast_table = InputOutput("CPU/GPU Forecast Table")
 
         # Main RL system flow (all dotted for harmony)
-        [states, actions] >> Edge(label="observation", style="dotted", color="#4682B4") >> env_manager
-        env_manager >> Edge(label="request action", style="dotted", color="#8FBC8F") >> model
+        (
+            [states, actions]
+            >> Edge(label="observation", style="dotted", color="#4682B4")
+            >> env_manager
+        )
+        (
+            env_manager
+            >> Edge(label="request action", style="dotted", color="#8FBC8F")
+            >> model
+        )
         model >> Edge(label="action", style="dotted", color="#8FBC8F") >> env_manager
 
         # Env Manager writes to buffer
-        env_manager >> Edge(label="write experience", style="dotted", color="#D2691E") >> experience
+        (
+            env_manager
+            >> Edge(label="write experience", style="dotted", color="#D2691E")
+            >> experience
+        )
         # Agent reads from buffer
-        experience << Edge(label="sample batch", style="dotted", color="#B8860B") << model
+        (
+            experience
+            << Edge(label="sample batch", style="dotted", color="#B8860B")
+            << model
+        )
 
         # Agent and Model
         model >> Edge(label="parameters", style="dotted", color="#708090") >> parameters
@@ -53,8 +72,13 @@ def rl_system_architecture(filename="rl_system_architecture"):
             c >> Edge(style="dotted", color="brown", label="metrics") >> forecast_model
 
         # Forecast Engine output
-        forecast_model >> Edge(style="dotted", color="#9932CC", label="forecast") >> forecast_table
+        (
+            forecast_model
+            >> Edge(style="dotted", color="#9932CC", label="forecast")
+            >> forecast_table
+        )
         forecast_table >> Edge(style="dotted", color="#FF8C00", label="result") >> user
+
 
 if __name__ == "__main__":
     rl_system_architecture(filename="architecture/images/rl_system_architecture")

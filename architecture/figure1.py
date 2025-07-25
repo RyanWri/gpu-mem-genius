@@ -12,22 +12,28 @@ with Diagram(
     show=False,
     direction="LR",
     graph_attr={"labelloc": "t", "fontsize": "28"},
-    filename="figure1"
+    filename="figure1",
 ):
-
     # Computation Layer (three components)
-    with Cluster("Computation Layer", graph_attr={"bgcolor": "#e3f2fd", "color": "#1976d2"}):
+    with Cluster(
+        "Computation Layer", graph_attr={"bgcolor": "#e3f2fd", "color": "#1976d2"}
+    ):
         env = Rack("Environment")
         agent = Integrations("Agent")
         buffer = Storage("Replay Buffer")
         computation = [env, agent, buffer]
 
     # Feature Extraction Layer (single analytics/monitoring node)
-    with Cluster("Feature Extraction Layer", graph_attr={"bgcolor": "#f9fbe7", "color": "#689f38"}):
+    with Cluster(
+        "Feature Extraction Layer",
+        graph_attr={"bgcolor": "#f9fbe7", "color": "#689f38"},
+    ):
         extractor = Prometheus("Feature Extractor")
 
     # Forecast Layer (ML model with two output nodes)
-    with Cluster("Forecast Layer", graph_attr={"bgcolor": "#e3f2fd", "color": "#1976d2"}):
+    with Cluster(
+        "Forecast Layer", graph_attr={"bgcolor": "#e3f2fd", "color": "#1976d2"}
+    ):
         forecast = Sagemaker("Forecast Model")
         cpu = Space("CPU")
         gpu = Space("GPU")
