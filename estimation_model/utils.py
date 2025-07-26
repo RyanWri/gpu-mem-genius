@@ -1,6 +1,5 @@
-import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, KFold
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -11,6 +10,8 @@ from sklearn.metrics import (
     r2_score,
     make_scorer,
 )
+
+
 def parse_state_dim(dim_str):
     try:
         dims = dim_str.strip("()").split(",")
@@ -35,12 +36,14 @@ def create_model(numeric_features, categorical_features):
     )
     return model
 
+
 def scorers():
     neg_mae = make_scorer(mean_absolute_error, greater_is_better=False)
     neg_rmse = make_scorer(root_mean_squared_error, greater_is_better=False)
     r2_scorer = make_scorer(r2_score)
-    return neg_mae,neg_rmse, r2_scorer
-    
+    return neg_mae, neg_rmse, r2_scorer
+
+
 def cross_validation(model, X, y, neg_mae, neg_rmse, r2_scorer):
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
     mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
@@ -51,4 +54,3 @@ def cross_validation(model, X, y, neg_mae, neg_rmse, r2_scorer):
     print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
     print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
     return mae_scores, rmse_scores, r2_scores
-

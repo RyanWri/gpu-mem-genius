@@ -4,7 +4,6 @@ from diagrams.onprem.monitoring import Prometheus
 from diagrams.generic.compute import Rack
 from diagrams.generic.storage import Storage
 from diagrams.aws.ml import Sagemaker
-from diagrams.programming.flowchart import InputOutput
 from diagrams.digitalocean.storage import Space
 
 with Diagram(
