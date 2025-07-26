@@ -1,0 +1,6 @@
+ruff<=0.5.3
+ipython
+pyclean<=2.7.2
+ipykernel
+jupyter
+diagrams
