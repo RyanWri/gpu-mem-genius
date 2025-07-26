@@ -1,120 +1,102 @@
 import pandas as pd
-import numpy as np
 from sklearn.model_selection import train_test_split, cross_val_score, KFold
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import (
-    mean_absolute_error,
-    root_mean_squared_error,
-    r2_score,
-    make_scorer,
+from estimation_model.utils import (
+    parse_state_dim,
+    create_model,
+    scorers,
+    save_model,
+    save_cv_results,
 )
 
 
-# 1. Load your dataset (adjust the path as needed)
-file_path = "/home/linuxu/datasets/atari-mem/all_data_combined.csv"
-df = pd.read_csv(file_path)
+def setup(filepath: str) -> pd.DataFrame:
+    df = pd.read_csv(filepath)
+    df["state_height"], df["state_width"] = zip(*df["state_dim"].map(parse_state_dim))
+    df_clean = df.dropna(subset=["state_height", "state_width"])
+    return df_clean
 
 
-# 2. Parse 'state_dim' feature into numeric 'state_height' and 'state_width'
-def parse_state_dim(dim_str):
-    try:
-        dims = dim_str.strip("()").split(",")
-        return int(dims[0]), int(dims[1])
-    except Exception:
-        # In case parsing fails, return NaN
-        return np.nan, np.nan
-
-
-df["state_height"], df["state_width"] = zip(*df["state_dim"].map(parse_state_dim))
-
-# Drop rows where parsing failed
-df_clean = df.dropna(subset=["state_height", "state_width"])
-
-# 3. Define input features and target variable
-#    Features are only those known before training begins
-features = [
-    "game_name",  # categorical: game/environment name
-    "state_height",  # numeric: height dimension of the state
-    "state_width",  # numeric: width dimension of the state
-    "action_dim",  # numeric: number of possible actions
-    "agent_hidden_model_size",  # numeric: size of hidden layers in the agent model
-    "exploration_rate",  # numeric: exploration rate hyperparameter
-    "buffer_max_size",  # numeric: max replay buffer size configured
-]
-target = "cpu_memory_used_mb"  # the CPU memory footprint to predict
-
-X = df_clean[features]
-y = df_clean[target]
-
-# 4. Split dataset into training and test sets (80/20 split)
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-
-# 5. Set up preprocessing pipelines for categorical and numeric features
-categorical_features = ["game_name"]
-numeric_features = [
-    "state_height",
-    "state_width",
-    "action_dim",
-    "agent_hidden_model_size",
-    "exploration_rate",
-    "buffer_max_size",
-]
-
-# OneHotEncoder for categorical, StandardScaler for numeric features
-preprocessor = ColumnTransformer(
-    transformers=[
-        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
-        ("num", StandardScaler(), numeric_features),
+# estimation based on apriori data only
+def static_arguments(gpu: bool = False):
+    target = "gpu_allocated_mb" if gpu else "cpu_memory_used_mb"
+    categorical_features = ["game_name"]
+    numeric_features = [
+        "state_height",
+        "state_width",
+        "action_dim",
+        "agent_hidden_model_size",
+        "exploration_rate",
+        "step",
     ]
-)
-
-# 6. Create the regression pipeline
-#    Using RandomForestRegressor for robust regression
-model = Pipeline(
-    steps=[
-        ("preprocessor", preprocessor),
-        ("regressor", RandomForestRegressor(random_state=42, n_estimators=100)),
-    ]
-)
-
-# 7. Train the model on training data
-model.fit(X_train, y_train)
-
-# 8. Predict on test data
-y_pred = model.predict(X_test)
+    return numeric_features, categorical_features, target
 
 
-def mae_scorer(y_true, y_pred):
-    return mean_absolute_error(y_true, y_pred)
+# improved model with data from warmup training steps
+def dynamic_arguments(gpu: bool = False):
+    numeric_features, categorical_features, target = static_arguments(gpu)
+    buffer_arguments = "buffer_current_usage_mb,buffer_max_usage_mb,buffer_usage_percent,buffer_current_size,buffer_max_size".split(
+        ","
+    )
+    if gpu:
+        gpu_arguments = [
+            "duration",
+            "gpu_reserved_mb",
+            "gpu_free_mb",
+            "gpu_usage_percent",
+        ]
+        numeric_features = numeric_features + gpu_arguments + buffer_arguments
+    else:
+        cpu_arguments = ["duration", "cpu_memory_percent"]
+        numeric_features = numeric_features + cpu_arguments + buffer_arguments
+
+    return numeric_features, categorical_features, target
 
 
-def rmse_scorer(y_true, y_pred):
-    return root_mean_squared_error(y_true, y_pred)
+def run_model(model_version: int, gpu: bool, model_save_directory: str) -> None:
+    filepath = "/home/ran/datasets/gpu-mem-genius/all_data_combined.csv"
+    df = setup(filepath)
+    model_name = "apriori" if model_version == 0 else "dynamic"
+    model_label = f"{model_name}_gpu" if gpu else f"{model_name}_cpu"
+    numeric_features, categorical_features, target = (
+        dynamic_arguments(gpu) if model_version == 1 else static_arguments(gpu)
+    )
+    X = df[numeric_features + categorical_features]
+    y = df[target]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    model = create_model(numeric_features, categorical_features)
+    model.fit(X_train, y_train)
+    save_model(model, model_label, model_save_directory)
+    neg_mae, neg_rmse, r2_scorer = scorers()
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
+    rmse_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_rmse)
+    r2_scores = cross_val_score(model, X, y, cv=kf, scoring=r2_scorer)
+
+    print(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}")
+    print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
+    print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
+    cv_dir = "/home/ran/models/gpu-mem-genius/results"
+    save_cv_results(
+        mae_scores, rmse_scores, r2_scores, model_label=model_label, out_dir=cv_dir
+    )
 
 
-# Wrap scorers for cross_val_score (needs higher is better, so negate errors)
-neg_mae = make_scorer(mae_scorer, greater_is_better=False)
-neg_rmse = make_scorer(rmse_scorer, greater_is_better=False)
-r2_scorer = make_scorer(r2_score)
+def main(version: int, gpu: bool = False):
+    model_version = {0: "apriori", 1: "dynamic"}
+    if model_version[version] not in ["apriori", "dynamic"]:
+        raise ValueError(f"model must be either apriori or dynamic, got {version}")
+    model_save_directory = "/home/ran/models/gpu-mem-genius"
+    run_model(model_version=version, gpu=gpu, model_save_directory=model_save_directory)
 
-# Prepare k-fold cross-validation
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
-# Compute cross-validated scores
-mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
-rmse_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_rmse)
-r2_scores = cross_val_score(model, X, y, cv=kf, scoring=r2_scorer)
-
-print(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}")
-print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
-print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
-
-with open("estimation_model/model_results.txt", "w") as f:
-    f.write(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}\n")
-    f.write(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}\n")
-    f.write(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}\n")
+if __name__ == "__main__":
+    print("running apriori model for cpu")
+    main(version=0, gpu=False)
+    print("running apriori model for gpu")
+    main(version=0, gpu=True)
+    print("running dynamic model for cpu")
+    main(version=1, gpu=False)
+    print("running dynamic model for gpu")
+    main(version=1, gpu=True)
