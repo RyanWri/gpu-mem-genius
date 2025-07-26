@@ -20,13 +20,6 @@ def parse_state_dim(dim_str):
         return np.nan, np.nan
 
 
-def split(df: pd.DataFrame, features: list[str], target: str):
-    X = df[features]
-    y = df[target]
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
-    return X_train, X_test, y_train, y_test
-
 def create_model(numeric_features, categorical_features):
     preprocessor = ColumnTransformer(
         transformers=[
@@ -42,14 +35,20 @@ def create_model(numeric_features, categorical_features):
     )
     return model
 
-def eval(y_true, y_pred):
-    def mae_scorer(y_true, y_pred):
-        return mean_absolute_error(y_true, y_pred)
-    def rmse_scorer(y_true, y_pred):
-        return root_mean_squared_error(y_true, y_pred)
-
-
-    neg_mae = make_scorer(mae_scorer, greater_is_better=False)
-    neg_rmse = make_scorer(rmse_scorer, greater_is_better=False)
+def scorers():
+    neg_mae = make_scorer(mean_absolute_error, greater_is_better=False)
+    neg_rmse = make_scorer(root_mean_squared_error, greater_is_better=False)
     r2_scorer = make_scorer(r2_score)
+    return neg_mae,neg_rmse, r2_scorer
     
+def cross_validation(model, X, y, neg_mae, neg_rmse, r2_scorer):
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
+    rmse_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_rmse)
+    r2_scores = cross_val_score(model, X, y, cv=kf, scoring=r2_scorer)
+
+    print(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}")
+    print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
+    print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
+    return mae_scores, rmse_scores, r2_scores
+
