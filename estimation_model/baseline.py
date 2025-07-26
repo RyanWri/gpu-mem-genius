@@ -1,6 +1,12 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split, cross_val_score, KFold
-from estimation_model.utils import parse_state_dim, create_model, scorers
+from estimation_model.utils import (
+    parse_state_dim,
+    create_model,
+    scorers,
+    save_model,
+    save_cv_results,
+)
 
 
 def setup(filepath: str) -> pd.DataFrame:
@@ -46,9 +52,14 @@ def dynamic_arguments(gpu: bool = False):
     return numeric_features, categorical_features, target
 
 
-def run_model(numeric_features, categorical_features, target):
+def run_model(model_version: int, gpu: bool, model_save_directory: str) -> None:
     filepath = "/home/ran/datasets/gpu-mem-genius/all_data_combined.csv"
     df = setup(filepath)
+    model_name = "apriori" if model_version == 0 else "dynamic"
+    model_label = f"{model_name}_gpu" if gpu else f"{model_name}_cpu"
+    numeric_features, categorical_features, target = (
+        dynamic_arguments(gpu) if model_version == 1 else static_arguments(gpu)
+    )
     X = df[numeric_features + categorical_features]
     y = df[target]
     X_train, X_test, y_train, y_test = train_test_split(
@@ -56,6 +67,7 @@ def run_model(numeric_features, categorical_features, target):
     )
     model = create_model(numeric_features, categorical_features)
     model.fit(X_train, y_train)
+    save_model(model, model_label, model_save_directory)
     neg_mae, neg_rmse, r2_scorer = scorers()
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
     mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
@@ -65,18 +77,18 @@ def run_model(numeric_features, categorical_features, target):
     print(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}")
     print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
     print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
-    return mae_scores, rmse_scores, r2_scores
+    cv_dir = "/home/ran/models/gpu-mem-genius/results"
+    save_cv_results(
+        mae_scores, rmse_scores, r2_scores, model_label=model_label, out_dir=cv_dir
+    )
 
 
 def main(version: int, gpu: bool = False):
     model_version = {0: "apriori", 1: "dynamic"}
     if model_version[version] not in ["apriori", "dynamic"]:
         raise ValueError(f"model must be either apriori or dynamic, got {version}")
-
-    numeric_features, categorical_features, target = (
-        dynamic_arguments(gpu) if version == 1 else static_arguments(gpu)
-    )
-    run_model(numeric_features, categorical_features, target)
+    model_save_directory = "/home/ran/models/gpu-mem-genius"
+    run_model(model_version=version, gpu=gpu, model_save_directory=model_save_directory)
 
 
 if __name__ == "__main__":

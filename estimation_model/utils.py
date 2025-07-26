@@ -1,4 +1,7 @@
+import os
+import joblib
 import numpy as np
+import pandas as pd
 from sklearn.model_selection import cross_val_score, KFold
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
@@ -49,8 +52,39 @@ def cross_validation(model, X, y, neg_mae, neg_rmse, r2_scorer):
     mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
     rmse_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_rmse)
     r2_scores = cross_val_score(model, X, y, cv=kf, scoring=r2_scorer)
-
-    print(f"MAE: Mean={-mae_scores.mean():.3f} MB, Std={mae_scores.std():.3f}")
-    print(f"RMSE: Mean={-rmse_scores.mean():.3f} MB, Std={rmse_scores.std():.3f}")
-    print(f"R²: Mean={r2_scores.mean():.6f}, Std={r2_scores.std():.6f}")
     return mae_scores, rmse_scores, r2_scores
+
+
+def save_model(model, model_label: str, out_dir: str):
+    filename = f"{model_label}.joblib"
+    full_path = os.path.join(out_dir, filename)
+    joblib.dump(model, full_path)
+    return full_path
+
+
+def save_cv_results(mae_scores, rmse_scores, r2_scores, model_label, out_dir):
+    df_folds = pd.DataFrame(
+        {
+            "fold": list(range(1, len(mae_scores) + 1)),
+            "MAE": -mae_scores,
+            "RMSE": -rmse_scores,
+            "R2": r2_scores,
+        }
+    )
+    path = os.path.join(out_dir, f"{model_label}_folds.csv")
+    df_folds.to_csv(path, index=False)
+
+    df_summary = pd.DataFrame(
+        [
+            {
+                "MAE_mean": -mae_scores.mean(),
+                "MAE_std": mae_scores.std(),
+                "RMSE_mean": -rmse_scores.mean(),
+                "RMSE_std": rmse_scores.std(),
+                "R2_mean": r2_scores.mean(),
+                "R2_std": r2_scores.std(),
+            }
+        ]
+    )
+    summary_path = os.path.join(out_dir, f"{model_label}_summary.csv")
+    df_summary.to_csv(summary_path, index=False)
