@@ -11,27 +11,28 @@ from sklearn.metrics import (
     r2_score,
     make_scorer,
 )
+from estimation_model.utils import parse_state_dim, split, create_model
+
+def setup(filepath: str) -> pd.DataFrame:
+    df = pd.read_csv(filepath)
+    df["state_height"], df["state_width"] = zip(*df["state_dim"].map(parse_state_dim))
+    df_clean = df.dropna(subset=["state_height", "state_width"])
+    return df_clean
 
 
-# 1. Load your dataset (adjust the path as needed)
-file_path = "/home/linuxu/datasets/atari-mem/all_data_combined.csv"
-df = pd.read_csv(file_path)
+def main():
+    filepath = "/home/linuxu/datasets/atari-mem/all_data_combined.csv"
+    df = setup(filepath)
+    x_train, x_test, y_train, y_test = split(df)
+    model = create_model(numeric_features, categorical_features)
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
 
-# 2. Parse 'state_dim' feature into numeric 'state_height' and 'state_width'
-def parse_state_dim(dim_str):
-    try:
-        dims = dim_str.strip("()").split(",")
-        return int(dims[0]), int(dims[1])
-    except Exception:
-        # In case parsing fails, return NaN
-        return np.nan, np.nan
 
 
-df["state_height"], df["state_width"] = zip(*df["state_dim"].map(parse_state_dim))
 
-# Drop rows where parsing failed
-df_clean = df.dropna(subset=["state_height", "state_width"])
 
 # 3. Define input features and target variable
 #    Features are only those known before training begins
@@ -43,16 +44,10 @@ features = [
     "agent_hidden_model_size",  # numeric: size of hidden layers in the agent model
     "exploration_rate",  # numeric: exploration rate hyperparameter
     "buffer_max_size",  # numeric: max replay buffer size configured
+    "step"
 ]
 target = "cpu_memory_used_mb"  # the CPU memory footprint to predict
 
-X = df_clean[features]
-y = df_clean[target]
-
-# 4. Split dataset into training and test sets (80/20 split)
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
 
 # 5. Set up preprocessing pipelines for categorical and numeric features
 categorical_features = ["game_name"]
@@ -65,45 +60,10 @@ numeric_features = [
     "buffer_max_size",
 ]
 
-# OneHotEncoder for categorical, StandardScaler for numeric features
-preprocessor = ColumnTransformer(
-    transformers=[
-        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
-        ("num", StandardScaler(), numeric_features),
-    ]
-)
-
-# 6. Create the regression pipeline
-#    Using RandomForestRegressor for robust regression
-model = Pipeline(
-    steps=[
-        ("preprocessor", preprocessor),
-        ("regressor", RandomForestRegressor(random_state=42, n_estimators=100)),
-    ]
-)
-
-# 7. Train the model on training data
-model.fit(X_train, y_train)
-
-# 8. Predict on test data
-y_pred = model.predict(X_test)
 
 
-def mae_scorer(y_true, y_pred):
-    return mean_absolute_error(y_true, y_pred)
+def 
 
-
-def rmse_scorer(y_true, y_pred):
-    return root_mean_squared_error(y_true, y_pred)
-
-
-# Wrap scorers for cross_val_score (needs higher is better, so negate errors)
-neg_mae = make_scorer(mae_scorer, greater_is_better=False)
-neg_rmse = make_scorer(rmse_scorer, greater_is_better=False)
-r2_scorer = make_scorer(r2_score)
-
-# Prepare k-fold cross-validation
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
 # Compute cross-validated scores
 mae_scores = cross_val_score(model, X, y, cv=kf, scoring=neg_mae)
