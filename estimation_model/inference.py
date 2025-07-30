@@ -1,25 +1,23 @@
 import joblib
 import pandas as pd
 from estimation_model.utils import parse_state_dim
+from itertools import product
 
 
 def load_model(model_path: str):
     return joblib.load(model_path)
 
 
-def main(model_label: str):
+def load_data():
     input_file = "/home/ran/datasets/gpu-mem-genius/all_data_combined.csv"
-    model_path = "/home/ran/models/gpu-mem-genius/apriori_cpu.joblib"
-
-    # Load model and data
-    model = load_model(model_path)
     df = pd.read_csv(input_file)
-
-    # Parse and clean state dimensions
     df["state_height"], df["state_width"] = zip(*df["state_dim"].map(parse_state_dim))
     df_clean = df.dropna(subset=["state_height", "state_width"])
+    return df_clean
 
-    # Define features
+
+def get_static_features(gpu: bool):
+    target = "gpu_allocated_mb" if gpu else "cpu_memory_used_mb"
     categorical_features = ["game_name"]
     numeric_features = [
         "state_height",
@@ -29,22 +27,68 @@ def main(model_label: str):
         "exploration_rate",
         "step",
     ]
-    feature_columns = numeric_features + categorical_features
+    feature_cols = numeric_features + categorical_features
+    return feature_cols, target
 
-    # Drop rows with missing feature values
-    df_features = df_clean.dropna(subset=feature_columns)
 
-    # Predict
+def get_dynamic_features(gpu: bool):
+    categorical_features = ["game_name"]
+    numeric_features = [
+        "state_height",
+        "state_width",
+        "action_dim",
+        "agent_hidden_model_size",
+        "exploration_rate",
+        "step",
+    ]
+    buffer_arguments = "buffer_current_usage_mb,buffer_max_usage_mb,buffer_usage_percent,buffer_current_size,buffer_max_size".split(
+        ","
+    )
+    if gpu:
+        gpu_arguments = [
+            "duration",
+            "gpu_reserved_mb",
+            "gpu_free_mb",
+            "gpu_usage_percent",
+        ]
+        numeric_features = numeric_features + gpu_arguments + buffer_arguments
+    else:
+        cpu_arguments = ["duration", "cpu_memory_percent"]
+        numeric_features = numeric_features + cpu_arguments + buffer_arguments
+
+    target = "gpu_allocated_mb" if gpu else "cpu_memory_used_mb"
+    feature_cols = numeric_features + categorical_features
+    return feature_cols, target
+
+
+def get_model_label(version: int, is_gpu: bool) -> str:
+    model_name = "dynamic" if version == 1 else "apriori"
+    target_name = "gpu" if is_gpu else "cpu"
+    print(f"Running model: ({version}, {is_gpu}) → {model_name}_{target_name}")
+    model_label = f"{model_name}_{target_name}"
+    return model_label
+
+
+def main(df: pd.DataFrame, version: int, gpu: bool):
+    model_label = get_model_label(version, gpu)
+    model_path = f"/home/ran/models/gpu-mem-genius/{model_label}.joblib"
+    model = load_model(model_path)
+    if version == 0:
+        feature_columns, target = get_static_features(gpu=gpu)
+    elif version == 1:
+        feature_columns, target = get_dynamic_features(gpu=gpu)
+
+    df_features = df.dropna(subset=feature_columns)
     X = df_features[feature_columns]
-    y_true = df_features["cpu_memory_used_mb"]
+    y_true = df_features[target]
     y_pred = model.predict(X)
-
-    # Combine for output
     results_df = df_features[["game_name", "step"]].copy()
-    results_df["actual_cpu_memory"] = y_true.values
-    results_df["predicted_cpu_memory"] = y_pred
-
-    # Save to CSV
+    if gpu:
+        actual_col, pred_col = "actual_gpu_memory", "predicted_gpu_memory"
+    else:
+        actual_col, pred_col = "actual_cpu_memory", "predicted_cpu_memory"
+    results_df[actual_col] = y_true.values
+    results_df[pred_col] = y_pred
     output_path = (
         f"/home/ran/models/gpu-mem-genius/results/predictions/{model_label}.csv"
     )
@@ -53,7 +97,6 @@ def main(model_label: str):
 
 
 if __name__ == "__main__":
-    for model_version, gpu in zip([0, 1], [False, True]):
-        model_name = "apriori" if model_version == 0 else "dynamic"
-        model_label = f"{model_name}_gpu" if gpu else f"{model_name}_cpu"
-        main(model_label=model_label)
+    df = load_data()
+    for version, is_gpu in product([0, 1], [False, True]):
+        main(df, version, is_gpu)
